@@ -70,7 +70,7 @@ ZSH_THEME="robbyrussell"
 # Custom plugins may be added to $ZSH_CUSTOM/plugins/
 # Example format: plugins=(rails git textmate ruby lighthouse)
 # Add wisely, as too many plugins slow down shell startup.
-plugins=(terraform)
+plugins=(terraform fzf gh git-prompt)
 
 export ZSH_CUSTOM=$(realpath ~/.oh-my-zsh-custom)
 source $ZSH/oh-my-zsh.sh
