@@ -1,1 +1,5 @@
+unset emptyline
+set tabstospaces
+set tabsize 4
+
 include ~/.nanorc.d/*.nanorc
