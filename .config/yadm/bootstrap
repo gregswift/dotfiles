@@ -1,31 +1,241 @@
-#!/bin/sh
+#!/bin/bash
 
-# Because Git submodule commands cannot operate without a work tree, they must
-# be run from within $HOME (assuming this is the root of your dotfiles)
-cd "$HOME"
+# ==============================================================================
+# Helper Functions
+# ==============================================================================
+
+# prompt_init - Prompt the user to initialize a tool
+# Usage: prompt_init "tool" "description" "init command" ["check command"]
+# If a check command is provided and passes, the init is skipped silently.
+prompt_init() {
+  local tool=$1
+  local description=$2
+  local command=$3
+  local check=$4
+
+  if [ -n "$check" ] && eval "$check" &> /dev/null; then
+    echo "${tool} already initialized, skipping."
+    echo ""
+    return 0
+  fi
+
+  read -r -p "Initialize ${tool} (${description})? [y/N] " response
+  if [[ "$response" =~ ^[Yy]$ ]]; then
+    eval "$command"
+  else
+    echo "Skipping ${tool} — run '${command}' later to set up."
+  fi
+  echo ""
+}
+
+# ==============================================================================
+# 1Password + SSH Agent
+# ==============================================================================
+
+# Ensure 1Password is installed
+if ! brew list --cask 1password &> /dev/null; then
+  echo "Installing 1Password..."
+  brew install --cask 1password
+fi
+
+# If 1Password SSH agent isn't already available, prompt the user.
+# 1Password's SSH agent works differently from a traditional agent —
+# it doesn't pre-load keys, it handles signing requests on demand.
+# So ssh-add -l returns "no identities" with exit code 1 even when
+# everything is working fine. The most reliable check is to test an
+# actual SSH connection against a known host. We use GitHub since
+# it's what subsequent steps rely on too.
+if ! ssh -T git@github.com 2>&1 | grep -q "successfully authenticated"; then
+  echo ""
+  echo "1Password SSH agent is not available. Before continuing you will need to:"
+  echo "  1. Log in to 1Password"
+  echo "  2. Go to Settings → Developer"
+  echo "  3. Enable 'Use the SSH agent'"
+  echo ""
+  read -r -p "Launch 1Password and wait for SSH agent? [y/N] " response
+  if [[ ! "$response" =~ ^[Yy]$ ]]; then
+    echo "Re-run 'yadm bootstrap' when ready."
+    exit 0
+  fi
+
+  # Launch 1Password if not already running
+  if ! pgrep -q "1Password"; then
+    echo "Launching 1Password..."
+    open -a "1Password"
+  fi
+
+  # Poll using GitHub SSH test since 1Password doesn't pre-load keys
+  POLL_INTERVAL=10
+  TIMEOUT=120
+  ELAPSED=0
+  echo "Polling for 1Password SSH agent every ${POLL_INTERVAL}s (timeout: ${TIMEOUT}s)..."
+  until ssh -T git@github.com 2>&1 | grep -q "successfully authenticated"; do
+    if [ "$ELAPSED" -ge "$TIMEOUT" ]; then
+      echo ""
+      echo "ERROR: Timed out waiting for 1Password SSH agent."
+      echo "Re-run 'yadm bootstrap' once 1Password is set up."
+      echo ""
+      exit 1
+    fi
+    sleep "$POLL_INTERVAL"
+    ELAPSED=$((ELAPSED + POLL_INTERVAL))
+    echo "Still waiting... (${ELAPSED}s elapsed)"
+  done
+
+fi
+
+echo "1Password SSH agent is ready."
+
+# ==============================================================================
+# Dotfiles Submodules
+# ==============================================================================
+
+# Git submodule commands cannot operate without a work tree, so run
+# from $HOME (the root of the dotfiles repo)
+cd "$HOME" || exit 1
 
 echo "Init submodules"
 yadm submodule update --recursive --init
+
+# ==============================================================================
+# macOS Setup
+# ==============================================================================
 
 system_type=$(uname -s)
 
 if [ "$system_type" = "Darwin" ]; then
 
-  # install homebrew if it's missing
+  # Enable the `locate` database
+  echo "Enabling the `locate` command database, you will be prompted for password as this required sudo"
+  sudo launchctl load -w /System/Library/LaunchDaemons/com.apple.locate.plist
+
+  # Install Homebrew if missing
   if ! command -v brew >/dev/null 2>&1; then
-    echo "Installing homebrew"
+    echo "Installing Homebrew..."
     /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
   fi
 
+  # oh-my-zsh first (shell environment foundation)
+  if [ ! -d "$HOME/.oh-my-zsh" ]; then
+    echo "Installing oh-my-zsh..."
+    sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
+  fi
+
+  # Install Brewfile packages
   if [ -f "$HOME/.Brewfile" ]; then
-    echo "Updating homebrew bundle"
+    echo "Updating Homebrew bundle..."
     brew bundle --global
   fi
 
+  # Pin apps that manage their own updates so brew autoupdate leaves them alone
+  for cask in 1password firefox google-chrome logi-options+ slack zoom; do
+    brew pin "$cask" 2>/dev/null
+  done
+
+  # Set up brew autoupdate for everything else (once per day)
+  if ! brew autoupdate status &> /dev/null; then
+    echo "Configuring Homebrew autoupdate..."
+    brew autoupdate start 86400 --upgrade --cleanup --formulae
+  fi
+
+  # ==============================================================================
+  # Default Browser
+  # ==============================================================================
+
+  # Note: macOS will always show a confirmation dialog when changing the default
+  # browser — this is hardcoded by Apple and cannot be suppressed. The user must
+  # click the confirmation to complete the change.
+  prompt_init "Default Browser" \
+    "set Firefox as default browser (requires clicking a confirmation dialog)" \
+    "defaultbrowser firefox" \
+    "defaultbrowser | grep -q '* firefox'"
+
+  # ==============================================================================
+  # Dock Layout
+  # ==============================================================================
+
+  prompt_init "Dock" \
+    "configure Dock layout (removes Apple defaults, adds your apps)" \
+    "dockutil --remove all --no-restart \
+      && dockutil --add /Applications/Visual\ Studio\ Code.app --no-restart \
+      && dockutil --add /Applications/Firefox.app --no-restart \
+      && dockutil --add /Applications/Slack.app --no-restart \
+      && dockutil --add /Applications/Ghostty.app --no-restart \
+      && dockutil --add /Applications/Podman\ Desktop.app --no-restart \
+      && dockutil --add /Applications/zoom.us.app --no-restart \
+      && dockutil --add /Applications/Google\ Chrome.app --no-restart \
+      && dockutil --add /Applications/1Password.app --no-restart \
+      && killall Dock" \
+    "dockutil --find Ghostty"
+
+# ==============================================================================
+# Linux Setup
+# ==============================================================================
+
 else
-  # this is likely a linux system
   if [ -f "$HOME/.dnffile" ]; then
-    echo "Installing expected files via DNF"
-    dnf shell $HOME/.dnffile
+    echo "Installing expected packages via DNF..."
+    dnf shell "$HOME/.dnffile"
   fi
 fi
+
+# ==============================================================================
+# Claude Code
+# ==============================================================================
+
+# Install via native installer so it keeps itself updated.
+# Alternatively installable via brew cask, but that lags behind releases
+# and requires manual `brew upgrade claude-code` to update.
+if ! command -v claude &> /dev/null; then
+  echo "Installing Claude Code..."
+  curl -fsSL https://claude.ai/install.sh | bash
+fi
+
+# ==============================================================================
+# Tool Initialization
+# ==============================================================================
+
+prompt_init "Claude Code" \
+  "authenticate with your Anthropic account (opens browser)" \
+  "claude auth login" \
+  "claude auth status"
+
+prompt_init "gh" \
+  "GitHub CLI auth" \
+  "gh auth login" \
+  "gh auth status"
+
+prompt_init "granted" \
+  "AWS SSO profile setup" \
+  "granted sso populate" \
+  "granted sso list"
+
+prompt_init "tailscale" \
+  "Tailscale VPN login" \
+  "sudo tailscale up" \
+  "tailscale status"
+
+# Podman machine resources — these must be set in your zsh environment
+# variables (e.g. ~/.zshenv) before running bootstrap.
+# Recommended for M5 Pro / 24GB: PODMAN_CPUS=6, PODMAN_MEMORY=12288, PODMAN_DISK=60
+# 12288MB (12GB) aligns with Apple Silicon's memory bank architecture.
+if [ "$system_type" = "Darwin" ]; then
+  if [ -z "$PODMAN_CPUS" ] || [ -z "$PODMAN_MEMORY" ] || [ -z "$PODMAN_DISK" ]; then
+    echo ""
+    echo "ERROR: Podman machine variables are not set."
+    echo "Please export the following in your zsh environment (e.g. ~/.zshenv):"
+    echo "  PODMAN_CPUS"
+    echo "  PODMAN_MEMORY"
+    echo "  PODMAN_DISK"
+    echo ""
+    exit 1
+  fi
+fi
+
+prompt_init "Podman" \
+  "initialize Podman machine (${PODMAN_CPUS} CPUs, ${PODMAN_MEMORY}MB RAM, ${PODMAN_DISK}GB disk) and install Docker socket helper" \
+  "podman machine init --cpus $PODMAN_CPUS --memory $PODMAN_MEMORY --disk-size $PODMAN_DISK \
+    && sudo $(brew --prefix podman)/bin/podman-mac-helper install \
+    && podman machine start" \
+  "podman machine inspect"
+
