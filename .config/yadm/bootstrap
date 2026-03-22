@@ -4,6 +4,15 @@
 # Helper Functions
 # ==============================================================================
 
+# install_oh_my_zsh - Common pattern across OSes, using function to reduce copy paste
+# Usage: install_oh_my_zsh
+install_oh_my_zsh() {
+  if [ ! -d "$HOME/.oh-my-zsh" ]; then
+    echo "Installing oh-my-zsh..."
+    sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
+  fi
+}
+
 # prompt_init - Prompt the user to initialize a tool
 # Usage: prompt_init "tool" "description" "init command" ["check command"]
 # If a check command is provided and passes, the init is skipped silently.
@@ -115,11 +124,7 @@ if [ "$system_type" = "Darwin" ]; then
     /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
   fi
 
-  # oh-my-zsh first (shell environment foundation)
-  if [ ! -d "$HOME/.oh-my-zsh" ]; then
-    echo "Installing oh-my-zsh..."
-    sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
-  fi
+  install_oh_my_zsh
 
   # Install Brewfile packages
   if [ -f "$HOME/.Brewfile" ]; then
@@ -177,6 +182,7 @@ else
     echo "Installing expected packages via DNF..."
     dnf shell "$HOME/.dnffile"
   fi
+  install_oh_my_zsh
 fi
 
 # ==============================================================================
