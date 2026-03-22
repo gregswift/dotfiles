@@ -1,0 +1,123 @@
+[url "ssh://git@github.com/"]
+  insteadOf = https://github.com/
+
+[include]
+  path = ~/.gitconfig.personal
+
+[includeIf "gitdir:~/Development/work"]
+  path = ~/.gitconfig.work
+
+[include]
+  # This allows you to commit some .gitconfig setting inside a repo
+  # in the root directory of the repo. I believe it acts as relative
+  # to the .git/ directory of the repo, but need to verify
+  path = ../.gitconfig.shared
+
+[alias]
+  lg = log --pretty=format:'%C(yellow)%h%C(reset) %C(cyan)%cI%C(reset) %s %C(blue)%an%C(reset) %C(green)%d%C(reset)' --graph
+  commend = commit --amend --no-edit
+  please = push --force-with-lease
+  praise = blame
+  review = log --summary --patch --stat=100 --dirstat --ignore-all-space --reverse --decorate --find-renames=33 --find-copies-harder --cc
+  supdate = submodule update --init --rebase
+  supgrade = submodule update --init --remote --rebase
+  up = pull --ff-only --all -p
+  who = blame
+
+[branch]
+  autosetuprebase = always
+
+[color]
+  ui = auto
+
+[commit]
+  gpgsign = true
+#  template = ~/.gitcommittemplate
+#  verbose = true
+
+[core]
+  commitGraph = true
+  excludesfile = ~/.gitignore.default
+  pager = delta
+  preloadindex = true
+  trustctime = false
+
+[delta]
+  features = side-by-side line-numbers decorations
+  hyperlinks = true
+  hyperlinks-file-link-format = "vscode://file/{path}:{line}"
+  line-numbers = true
+  #minus-style = syntax "#3f0001"
+  navigate = true
+  #plus-style = syntax "#003800"
+  side-by-side = true
+  syntax-theme = Dracula # Darkmode GitHub-esque theme
+
+[delta "decorations"]
+  commit-decoration-style = bold yellow box ul
+  file-decoration-style = none
+  file-style = bold yellow ul
+  hunk-header-decoration-style = cyan box ul
+
+[delta "line-numbers"]
+  line-numbers-left-style = cyan
+  line-numbers-minus-style = 124
+  line-numbers-plus-style = 28
+  line-numbers-right-style = cyan
+
+[diff]
+  colorMoved = default
+
+[fetch]
+  prune = true
+  pruneTags = true
+  output = full
+
+[gpg]
+  format = ssh
+
+[gpg "ssh"]
+{% if yadm.os == "Darwin" %}
+  program = "/Applications/1Password.app/Contents/MacOS/op-ssh-sign"
+{% else %}
+  program = "/opt/1Password/op-ssh-sign"
+{% endif %}
+
+[help]
+  autocorrect = prompt
+
+[init]
+  defaultBranch = main
+
+[interactive]
+  diffFilter = delta --color-only
+
+[log]
+  date = local
+
+[merge]
+  tool = code
+
+[mergetool "code"]
+  cmd = code --wait --merge $REMOTE $LOCAL $BASE $MERGED
+
+[mergetool "vscode"]
+  cmd = code --wait --merge $REMOTE $LOCAL $BASE $MERGED
+
+[pull]
+  rebase = true
+  recurseSubmodules = on-demand
+
+[push]
+  autoSetupRemote = true
+
+[rebase]
+  autoStash = true
+
+[remote "origin"]
+  # This adds pull requests to fetched refs
+  fetch = +refs/pull/*/head:refs/remotes/origin/pull/*
+
+[status]
+  color = true
+  submodulesummary = true
