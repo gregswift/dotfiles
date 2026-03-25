@@ -107,5 +107,10 @@
   },
   "console_title_template": "{{ .Folder }}",
   "final_space": true,
+  "upgrade": {
+    "notice": true,
+    "auto": false,
+    "source": "cdn"
+  },
   "version": 4
 }
