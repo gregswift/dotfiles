@@ -8,7 +8,7 @@ git-rebase-branch () {
 }
 
 # Other aliases
-if [[ -f "$(which kubecolor)" ]]; then
+if [[ -f "$(which kubecolor 2> /dev/null)" ]]; then
   # If kubecolor is installed, lets use that instead of standard kubectl
   alias kubectl=kubecolor
   compdef kubecolor=kubectl # Make "kubecolor" borrow the same completion logic as "kubectl"
