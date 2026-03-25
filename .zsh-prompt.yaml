@@ -1,0 +1,96 @@
+{
+  "$schema": "https://raw.githubusercontent.com/JanDeDobbeleer/oh-my-posh/main/themes/schema.json",
+  "blocks": [
+    {
+      "alignment": "left",
+      "segments": [
+        {
+          "background": "#00897b",
+          "background_templates": [
+            "{{ if ne .Code 0 }}#e91e63{{ end }}"
+          ],
+          "foreground": "#fff",
+          "leading_diamond": "\ue0b6",
+          "style": "diamond",
+          "template": "{{ if eq .Code 0 }}\u2713 {{ else }}\u2718 {{ end }}",
+          "type": "status",
+          "options": {
+            "always_enabled": true
+          }
+        },
+        {
+          "background": "#00897b",
+          "background_templates": [
+            "{{ if ne .Code 0 }}#e91e63{{ end }}"
+          ],
+          "foreground": "#fff",
+          "options": {
+            "style": "unique"
+          },
+          "style": "diamond",
+          "template": "{{ .Path }} ",
+          "trailing_diamond": "\ue0c6",
+          "type": "path"
+        },
+        {
+          "background": "#5682d8",
+          "foreground": "#fff",
+          "leading_diamond": "\ue0c7",
+          "options": {
+            "branch_icon": "",
+            "fetch_status": true,
+            "fetch_upstream_icon": true,
+            "mapped_branches": {
+              "feat/*": "🚀 ",
+              "bug/*": "🐛 "
+            },
+          },
+          "style": "diamond",
+          "template": " {{ .HEAD }}{{if .BranchStatus }} {{ .BranchStatus }}{{ end }}{{ if .Working.Changed }}  {{ .Working.String }}{{ end }}{{ if and (.Staging.Changed) (.Working.Changed) }} |{{ end }}{{ if .Staging.Changed }} \uF046 {{ .Staging.String }}{{ end }} ",
+          "trailing_diamond": "\ue0c6",
+          "type": "git"
+        },
+        {
+          "background": "#7a7a7a",
+          "foreground": "#fff",
+          "foreground_templates": [
+            "{{if contains \"dev\" .Profile}}#66ed5c{{end}}",
+            "{{if contains \"stag\" .Profile}}#ea9f54{{end}}",
+            "{{if contains \"prod\" .Profile}}#ed616a{{end}}"
+          ],
+          "leading_diamond": "\ue0c7",
+          "style": "diamond",
+          "template": " {{.Profile}} ",
+          "trailing_diamond": "\ue0c6",
+          "type": "aws"
+        },
+        {
+          "background": "#7a7a7a",
+          "foreground_templates": [
+            "{{if contains \"dev\" .Context}}#4cef40{{end}}",
+            "{{if contains \"stag\" .Context}}#ea8927{{end}}",
+            "{{if contains \"prod\" .Context}}#ef404c{{end}}"
+          ],
+          "foreground": "#fff",
+          "leading_diamond": "\ue0c7",
+          "style": "diamond",
+          "template": " {{.Context}}{{if .Namespace}}/{{.Namespace}}{{end}} ",
+          "trailing_diamond": "\ue0c6",
+          "type": "kubectl"
+        }
+      ],
+      "type": "prompt"
+    }
+  ],
+  "console_title_template": "{{ .Folder }}",
+  "transient_prompt": {
+    "background": "transparent",
+    "foreground": "#ffffff",
+    "foreground_templates": [
+        "{{ if eq .Code 0 }}#00897b{{ else }}#e91e63{{ end }}"
+    ],
+    "template": "\ue0b6{{ if eq .Code 0 }}<#ffffff,#00897b>\u2713 </>{{ else }}<#ffffff,#e91e63>\u2718 </>{{ end }}\ue0c6",
+  },
+  "final_space": true,
+  "version": 4
+}

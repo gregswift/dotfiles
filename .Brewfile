@@ -29,10 +29,11 @@ brew "jq"
 # Kubernetes cli tooling
 brew "kubectl"
 brew "kubectx"
-brew "kube-ps1"
 brew "kustomize"
 # Newer nano than MacOS provides (they actually use a new pico, and link it. ew)
 brew "nano"
+# Oh My Posh Prompt manager
+brew "jandedobbeleer/oh-my-posh/oh-my-posh"
 # A OCI compliance container engine setup
 brew "podman"
 brew "podman-compose"
