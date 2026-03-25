@@ -5,7 +5,8 @@ else
   alias assume="source assume"
 fi
 
-export GRANTED_ENABLE_AUTO_REASSUME=true
+# https://github.com/fwdcloudsec/granted/issues/547
+#export GRANTED_ENABLE_AUTO_REASSUME=true
 
 fpath=(~/.granted/zsh_autocomplete/assume/ $fpath)
 

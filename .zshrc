@@ -72,7 +72,8 @@ ZSH_THEME="af-magic"
 # Add wisely, as too many plugins slow down shell startup.
 plugins=(fastfile fluxcd fzf gh git-prompt helm kubectl kubectx kube-ps1 pulumi tailscale terraform)
 
-export ZSH_CUSTOM=$(realpath ~/.oh-my-zsh-custom)
+export fastfile_var_prefix='@'
+export ZSH_CUSTOM=$(realpath ~/.oh-my-zsh.d)
 source $ZSH/oh-my-zsh.sh
 
 # User configuration

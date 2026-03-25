@@ -1,4 +1,5 @@
-export EDITOR=nano
+export GITHUB_USER=gregswift
+
 # Disable warnings that podman-compose is running instead of docker-compose
 export PODMAN_COMPOSE_WARNING_LOGS=false
 
@@ -11,6 +12,10 @@ if [[ $(uname) == "Darwin" ]]; then
   # Configure Helm's registry config file because kustomize overrides most of the
   # settings, which makes accessing and authenticated helm registry fail
   export HELM_REGISTRY_CONFIG=~/Library/Preferences/helm/registry/config.json
+  # Make homebew les noisy
+  export HOMEBREW_NO_ENV_HINTS=1
+  export EDITOR=/opt/homebrew/bin/nano
 else
+  export EDITOR=nano
   export HELM_REGISTRY_CONFIG=~/.config/helm/registry/config.json
 fi
