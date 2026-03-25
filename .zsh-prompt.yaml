@@ -62,7 +62,7 @@
     {
       "background": "#7a7a7a",
       "foreground": "#fff",
-      "foreground_templates": [
+      "background_templates": [
         "{{if contains \"dev\" .Profile}}#66ed5c{{end}}",
         "{{if contains \"stag\" .Profile}}#ea9f54{{end}}",
         "{{if contains \"prod\" .Profile}}#ed616a{{end}}"
@@ -80,7 +80,7 @@
     },
     {
       "background": "#7a7a7a",
-      "foreground_templates": [
+      "background_templates": [
         "{{if contains \"dev\" .Context}}#4cef40{{end}}",
         "{{if contains \"stag\" .Context}}#ea8927{{end}}",
         "{{if contains \"prod\" .Context}}#ef404c{{end}}"
