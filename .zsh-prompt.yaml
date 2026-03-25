@@ -25,7 +25,10 @@
           ],
           "foreground": "#fff",
           "options": {
-            "style": "unique"
+            "folder_icon": "\u2026",
+            "folder_separator_icon": "/",
+            "style": "agnoster_short",
+            "max_depth": 3
           },
           "style": "diamond",
           "template": "{{ .Path }} ",
