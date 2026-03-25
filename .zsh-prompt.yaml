@@ -49,40 +49,51 @@
           "template": " {{ .HEAD }}{{if .BranchStatus }} {{ .BranchStatus }}{{ end }}{{ if .Working.Changed }}  {{ .Working.String }}{{ end }}{{ if and (.Staging.Changed) (.Working.Changed) }} |{{ end }}{{ if .Staging.Changed }} \uF046 {{ .Staging.String }}{{ end }} ",
           "trailing_diamond": "\ue0c6",
           "type": "git"
-        },
-        {
-          "background": "#7a7a7a",
-          "foreground": "#fff",
-          "foreground_templates": [
-            "{{if contains \"dev\" .Profile}}#66ed5c{{end}}",
-            "{{if contains \"stag\" .Profile}}#ea9f54{{end}}",
-            "{{if contains \"prod\" .Profile}}#ed616a{{end}}"
-          ],
-          "leading_diamond": "\ue0c7",
-          "style": "diamond",
-          "template": " {{.Profile}} ",
-          "trailing_diamond": "\ue0c6",
-          "type": "aws"
-        },
-        {
-          "background": "#7a7a7a",
-          "foreground_templates": [
-            "{{if contains \"dev\" .Context}}#4cef40{{end}}",
-            "{{if contains \"stag\" .Context}}#ea8927{{end}}",
-            "{{if contains \"prod\" .Context}}#ef404c{{end}}"
-          ],
-          "foreground": "#fff",
-          "leading_diamond": "\ue0c7",
-          "style": "diamond",
-          "template": " {{.Context}}{{if .Namespace}}/{{.Namespace}}{{end}} ",
-          "trailing_diamond": "\ue0c6",
-          "type": "kubectl"
         }
       ],
       "type": "prompt"
     }
   ],
-  "console_title_template": "{{ .Folder }}",
+  "tooltips_action": "replace",
+  "tooltips": [
+    {
+      "background": "#7a7a7a",
+      "foreground": "#fff",
+      "foreground_templates": [
+        "{{if contains \"dev\" .Profile}}#66ed5c{{end}}",
+        "{{if contains \"stag\" .Profile}}#ea9f54{{end}}",
+        "{{if contains \"prod\" .Profile}}#ed616a{{end}}"
+      ],
+      "leading_diamond": "\ue0c7",
+      "style": "diamond",
+      "template": " {{.Profile}} ",
+      "tips": [
+        "aws",
+        "pulumi",
+        "terraform"
+      ],
+      "trailing_diamond": "\ue0c6",
+      "type": "aws"
+    },
+    {
+      "background": "#7a7a7a",
+      "foreground_templates": [
+        "{{if contains \"dev\" .Context}}#4cef40{{end}}",
+        "{{if contains \"stag\" .Context}}#ea8927{{end}}",
+        "{{if contains \"prod\" .Context}}#ef404c{{end}}"
+      ],
+      "foreground": "#fff",
+      "leading_diamond": "\ue0c7",
+      "style": "diamond",
+      "template": " {{.Context}}{{if .Namespace}}/{{.Namespace}}{{end}} ",
+      "tips": [
+        "kc",
+        "kubectl"
+      ],
+      "trailing_diamond": "\ue0c6",
+      "type": "kubectl"
+    }
+  ],
   "transient_prompt": {
     "background": "transparent",
     "foreground": "#ffffff",
@@ -91,6 +102,7 @@
     ],
     "template": "\ue0b6{{ if eq .Code 0 }}<#ffffff,#00897b>\u2713 </>{{ else }}<#ffffff,#e91e63>\u2718 </>{{ end }}\ue0c6",
   },
+  "console_title_template": "{{ .Folder }}",
   "final_space": true,
   "version": 4
 }
