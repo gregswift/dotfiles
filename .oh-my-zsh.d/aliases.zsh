@@ -16,6 +16,7 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
   # these are general that i care about
   alias docker="podman"
   alias nano="$(brew --prefix nano)/bin/nano"
+  alias python='podman run --rm -it -w /data -v /Users/gregswift:/data:Z ghcr.io/astral-sh/uv:python3.14-alpine uv run python'
 
   # these are typically dayjob oriented
   alias actionlint="go run github.com/rhysd/actionlint/cmd/actionlint"
