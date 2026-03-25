@@ -27,6 +27,7 @@ brew "helm"
 # JQ cli tool for working with json
 brew "jq"
 # Kubernetes cli tooling
+brew "kubecolor"
 brew "kubectl"
 brew "kubectx"
 brew "kustomize"
