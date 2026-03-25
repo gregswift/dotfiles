@@ -1,11 +1,14 @@
+# My Git enablement aliases/functions
 alias git-rebase='git-refresh && git rebase -i $(git merge-base $(git branch -r | awk "/HEAD ->/ { print \$NF }") $(git branch --show-current))'
 alias git-refresh='git fetch --all -p && git rebase $(git branch -r | awk "/HEAD ->/ { print \$NF }")'
-
 git-rebase-branch () {
   git fetch --all -p
   git rebase ${1}
   git-rebase -i $(git merge-base ${1} $(git branch --show-current))
 }
+
+# Other aliases
+alias kc="kubectl"
 
 if [[ "$(uname -s)" == "Darwin" ]]; then
   # moving these under macos cause i will likely never need most of them on linux this way

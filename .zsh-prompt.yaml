@@ -100,7 +100,7 @@
     "foreground_templates": [
         "{{ if eq .Code 0 }}#00897b{{ else }}#e91e63{{ end }}"
     ],
-    "template": "\ue0b6{{ if eq .Code 0 }}<#ffffff,#00897b>\u2713 </>{{ else }}<#ffffff,#e91e63>\u2718 </>{{ end }}\ue0c6",
+    "template": "\ue0b6{{ if eq .Code 0 }}<#ffffff,#00897b>\u2713 </>{{ else }}<#ffffff,#e91e63>\u2718 </>{{ end }}\ue0c6 # ",
   },
   "console_title_template": "{{ .Folder }}",
   "final_space": true,
