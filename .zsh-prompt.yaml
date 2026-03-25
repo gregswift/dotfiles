@@ -1,15 +1,25 @@
 {
   "$schema": "https://raw.githubusercontent.com/JanDeDobbeleer/oh-my-posh/main/themes/schema.json",
+  "palette": {
+    "text": "#ffffff",
+    "tooltip-text": "#dddddd",
+    "error": "#e91e63",
+    "success": "#00897b",
+    "git-bg": "#5682d8",
+    "dev-bg": "#66ed5c",
+    "staging-bg": "#ea8927",
+    "prod-bg": "#ef404c"
+  },
   "blocks": [
     {
       "alignment": "left",
       "segments": [
         {
-          "background": "#00897b",
+          "background": "p:success",
           "background_templates": [
-            "{{ if ne .Code 0 }}#e91e63{{ end }}"
+            "{{ if ne .Code 0 }}p:error{{ end }}"
           ],
-          "foreground": "#fff",
+          "foreground": "p:text",
           "leading_diamond": "\ue0b6",
           "style": "diamond",
           "template": "{{ if eq .Code 0 }}\u2713 {{ else }}\u2718 {{ end }}",
@@ -19,11 +29,11 @@
           }
         },
         {
-          "background": "#00897b",
+          "background": "p:success",
           "background_templates": [
-            "{{ if ne .Code 0 }}#e91e63{{ end }}"
+            "{{ if ne .Code 0 }}p:error{{ end }}"
           ],
-          "foreground": "#fff",
+          "foreground": "p:text",
           "options": {
             "folder_icon": "\u2026",
             "folder_separator_icon": "/",
@@ -36,8 +46,8 @@
           "type": "path"
         },
         {
-          "background": "#5682d8",
-          "foreground": "#fff",
+          "background": "p:git-bg",
+          "foreground": "p:text",
           "leading_diamond": "\ue0c7",
           "options": {
             "branch_icon": "",
@@ -60,13 +70,13 @@
   "tooltips_action": "replace",
   "tooltips": [
     {
-      "background": "#7a7a7a",
-      "foreground": "#fff",
+      "background": "p:error",
       "background_templates": [
-        "{{if contains \"dev\" .Profile}}#66ed5c{{end}}",
-        "{{if contains \"stag\" .Profile}}#ea9f54{{end}}",
-        "{{if contains \"prod\" .Profile}}#ed616a{{end}}"
+        "{{if contains \"dev\" .Profile}}p:dev-bg{{end}}",
+        "{{if contains \"stag\" .Profile}}p:staging-bg{{end}}",
+        "{{if contains \"prod\" .Profile}}p:prod-bg{{end}}"
       ],
+      "foreground": "p:tooltip-text",
       "leading_diamond": "\ue0c7",
       "style": "diamond",
       "template": " {{.Profile}} ",
@@ -79,13 +89,13 @@
       "type": "aws"
     },
     {
-      "background": "#7a7a7a",
+      "background": "p:error",
       "background_templates": [
-        "{{if contains \"dev\" .Context}}#4cef40{{end}}",
-        "{{if contains \"stag\" .Context}}#ea8927{{end}}",
-        "{{if contains \"prod\" .Context}}#ef404c{{end}}"
+        "{{if contains \"dev\" .Context}}p:dev-bg{{end}}",
+        "{{if contains \"stag\" .Context}}p:staging-bg{{end}}",
+        "{{if contains \"prod\" .Context}}p:prod-bg{{end}}"
       ],
-      "foreground": "#fff",
+      "foreground": "p:tooltip-text",
       "leading_diamond": "\ue0c7",
       "style": "diamond",
       "template": " {{.Context}}{{if .Namespace}}/{{.Namespace}}{{end}} ",
@@ -99,11 +109,11 @@
   ],
   "transient_prompt": {
     "background": "transparent",
-    "foreground": "#ffffff",
+    "foreground": "p:text",
     "foreground_templates": [
-        "{{ if eq .Code 0 }}#00897b{{ else }}#e91e63{{ end }}"
+        "{{ if eq .Code 0 }}p:success{{ else }}p:error{{ end }}"
     ],
-    "template": "\ue0b6{{ if eq .Code 0 }}<#ffffff,#00897b>\u2713 </>{{ else }}<#ffffff,#e91e63>\u2718 </>{{ end }}\ue0c6 # ",
+    "template": "\ue0b6{{ if eq .Code 0 }}<p:text,p:success>\u2713 </>{{ else }}<p:text,p:error>\u2718 </>{{ end }}\ue0c6 # ",
   },
   "console_title_template": "{{ .Folder }}",
   "final_space": true,
