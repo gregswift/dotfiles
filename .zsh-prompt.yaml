@@ -1,8 +1,9 @@
 {
   "$schema": "https://raw.githubusercontent.com/JanDeDobbeleer/oh-my-posh/main/themes/schema.json",
   "palette": {
-    "text": "#ffffff",
-    "tooltip-text": "#dddddd",
+    "text": "#000000",
+    "black": "#000000",
+    "tooltip-text": "#000000",
     "error": "#e91e63",
     "success": "#00897b",
     "git-bg": "#5682d8",
@@ -27,20 +28,6 @@
             "{{ if ne .Code 0 }}p:error{{ end }}"
           ],
           "foreground": "p:text",
-          "leading_diamond": "\ue0b6",
-          "style": "diamond",
-          "template": "{{ if eq .Code 0 }}\u2713 {{ else }}\u2718 {{ end }}",
-          "type": "status",
-          "options": {
-            "always_enabled": true
-          }
-        },
-        {
-          "background": "p:success",
-          "background_templates": [
-            "{{ if ne .Code 0 }}p:error{{ end }}"
-          ],
-          "foreground": "p:text",
           "options": {
             "folder_icon": "\u2026",
             "folder_separator_icon": "/",
@@ -48,7 +35,7 @@
             "max_depth": 3
           },
           "style": "diamond",
-          "template": "{{ .Path }} ",
+          "template": " {{ .Path }} ",
           "trailing_diamond": "\ue0c6",
           "type": "path"
         },
@@ -69,6 +56,47 @@
           "template": " {{ .HEAD }}{{if .BranchStatus }} {{ .BranchStatus }}{{ end }}{{ if .Working.Changed }}  {{ .Working.String }}{{ end }}{{ if and (.Staging.Changed) (.Working.Changed) }} |{{ end }}{{ if .Staging.Changed }} \uF046 {{ .Staging.String }}{{ end }} ",
           "trailing_diamond": "\ue0c6",
           "type": "git"
+        },
+        {
+          "background": "p:error",
+          "background_templates": [
+            "{{if contains \"dev\" .Profile}}p:dev-bg{{end}}",
+            "{{if contains \"stag\" .Profile}}p:staging-bg{{end}}",
+            "{{if contains \"prod\" .Profile}}p:prod-bg{{end}}"
+          ],
+          "foreground": "p:text",
+          "leading_diamond": "\ue0c7",
+          "style": "diamond",
+          "template": "  ",
+          "trailing_diamond": "\ue0c6",
+          "type": "aws"
+        },
+        {
+          "background": "p:error",
+          "background_templates": [
+            "{{if contains \"dev\" .Context}}p:dev-bg{{end}}",
+            "{{if contains \"stag\" .Context}}p:staging-bg{{end}}",
+            "{{if contains \"prod\" .Context}}p:prod-bg{{end}}"
+          ],
+          "foreground": "p:text",
+          "leading_diamond": "\ue0c7",
+          "style": "diamond",
+          "template": " 󱃾 ",
+          "trailing_diamond": "\ue0c6",
+          "type": "kubectl"
+        },
+        {
+          "background": "transparent",
+          "foreground": "p:success",
+          "foreground_templates": [
+            "{{ if ne .Code 0 }}p:error{{ end }}"
+          ],
+          "style": "plain",
+          "template": " # ",
+          "type": "status",
+          "options": {
+            "always_enabled": true
+          }
         }
       ],
       "type": "prompt"
@@ -121,7 +149,7 @@
     "foreground_templates": [
         "{{ if eq .Code 0 }}p:success{{ else }}p:error{{ end }}"
     ],
-    "template": "\ue0b6{{ if eq .Code 0 }}<p:text,p:success>\u2713 </>{{ else }}<p:text,p:error>\u2718 </>{{ end }}\ue0c6 # ",
+    "template": "# "
   },
   "console_title_template": "{{ .Folder }}",
   "final_space": true,
