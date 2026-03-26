@@ -10,6 +10,13 @@
     "staging-bg": "#ea8927",
     "prod-bg": "#ef404c"
   },
+  "profiles":{
+    "defaults": {
+      "font": {
+        "face": "MesloLGM Nerd Font"
+      }
+    }
+  },
   "blocks": [
     {
       "alignment": "left",
@@ -67,6 +74,7 @@
       "type": "prompt"
     }
   ],
+
   "tooltips_action": "replace",
   "tooltips": [
     {
