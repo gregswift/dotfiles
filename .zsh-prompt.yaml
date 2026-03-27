@@ -121,7 +121,6 @@
         "pulumi",
         "terraform"
       ],
-      "trailing_diamond": "\ue0c6",
       "type": "aws"
     },
     {
@@ -139,7 +138,6 @@
         "kc",
         "kubectl"
       ],
-      "trailing_diamond": "\ue0c6",
       "type": "kubectl"
     }
   ],
