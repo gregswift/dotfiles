@@ -27,6 +27,7 @@ brew "helm"
 # JQ cli tool for working with json
 brew "jq"
 # Kubernetes cli tooling
+brew "krew"
 brew "kubecolor"
 brew "kubectl"
 brew "kubectx"
@@ -40,8 +41,11 @@ brew "podman"
 brew "podman-compose"
 # Install Pulumi CLI
 brew "pulumi/tap/pulumi"
+brew "pulumi/tap/esc"
 # Install the actual terraform package from hashicorp
 brew "hashicorp/tap/terraform"
+# The tree cli command for viewing file structures
+brew "tree"
 # mikefarah's YQ cli tool for working with yaml
 brew "yq"
 
