@@ -209,6 +209,14 @@ if ! command -v claude &> /dev/null; then
   curl -fsSL https://claude.ai/install.sh | bash
 fi
 
+
+# ==============================================================================
+# Install Krew plugins
+# ==============================================================================
+# Should probably try this with `prompt_init` ?
+kubectl krew update
+kubectl krew install < ~/.krewfile
+
 # ==============================================================================
 # Tool Initialization
 # ==============================================================================

@@ -8,13 +8,18 @@ git-rebase-branch () {
 }
 
 # Other aliases
-if [[ -f "$(which kubecolor 2> /dev/null)" ]]; then
+KUBECOLOR=$(which kubecolor 2> /dev/null)
+if [[ -f "${KUBECOLOR}" ]]; then
   # If kubecolor is installed, lets use that instead of standard kubectl
-  alias kubectl=kubecolor
+  alias kubectl=${KUBECOLOR}
   compdef kubecolor=kubectl # Make "kubecolor" borrow the same completion logic as "kubectl"
 fi
 alias kc="kubectl"
-
+KREW=$(which kubectl-krew 2> /dev/null)
+if [[ -f "${KREW}" ]]; then
+  alias krew=${KREW}
+  export PATH="${KREW_ROOT:-$HOME/.krew}/bin:$PATH"
+fi
 
 if [[ "$(uname -s)" == "Darwin" ]]; then
   # moving these under macos cause i will likely never need most of them on linux this way
