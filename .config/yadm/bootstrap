@@ -209,7 +209,6 @@ if ! command -v claude &> /dev/null; then
   curl -fsSL https://claude.ai/install.sh | bash
 fi
 
-
 # ==============================================================================
 # Install Krew plugins
 # ==============================================================================
@@ -288,3 +287,7 @@ if [ "${system_type}" = "Darwin" ]; then
       "podman machine inspect"
   fi
 fi
+
+# Adds the font for the current oh-my-posh prompt
+oh-my-posh font install --headless Meslo
+
