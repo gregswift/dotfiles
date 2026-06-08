@@ -136,7 +136,8 @@
       "template": " {{.Context}}{{if .Namespace}}/{{.Namespace}}{{end}} ",
       "tips": [
         "kc",
-        "kubectl"
+        "kubectl",
+        "kubectx"
       ],
       "type": "kubectl"
     }
