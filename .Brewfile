@@ -32,6 +32,8 @@ brew "kubecolor"
 brew "kubectl"
 brew "kubectx"
 brew "kustomize"
+# To integrate with podman for local k8s environment
+brew "minikube"
 # Newer nano than MacOS provides (they actually use a new pico, and link it. ew)
 brew "nano"
 # Oh My Posh Prompt manager
