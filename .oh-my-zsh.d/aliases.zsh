@@ -6,6 +6,11 @@ git-rebase-branch () {
   git rebase ${1}
   git-rebase -i $(git merge-base ${1} $(git branch --show-current))
 }
+git-new-worktree () {
+  git fetch --all -p
+  WT_BASE_DIR=$(dirname $(git rev-parse --show-toplevel))
+  git worktree add -b ${1} ${WT_BASE_DIR}/${1} && echo "New worktree for branch ${1} created at ${WT_BASE_DIR}/${1}"
+}
 
 # Other aliases
 KUBECOLOR=$(which kubecolor 2> /dev/null)
@@ -34,7 +39,7 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
   alias cue="go run cuelang.org/go/cmd/cue"
   alias kube-linter="go run golang.stackrox.io/kube-linter/cmd/kube-linter"
   #alias pulumi="docker run -it -e PULUMI_ACCESS_TOKEN -v $(pwd):/app pulumi/pulumi"
-  alias sops="docker run --rm -it ghcr.io/getsops/sops:v3.12.1-alpine"
+  #alias sops="docker run --rm -it ghcr.io/getsops/sops:v3.12.1-alpine"
 else
   alias jq="docker run --rm -i apteno/alpine-jq jq"
 fi
