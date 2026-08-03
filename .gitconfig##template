@@ -18,11 +18,13 @@
   commend = commit --amend --no-edit
   please = push --force-with-lease
   praise = blame
+  prunetrees = "worktree prune"
   review = log --summary --patch --stat=100 --dirstat --ignore-all-space --reverse --decorate --find-renames=33 --find-copies-harder --cc
   supdate = submodule update --init --rebase
   supgrade = submodule update --init --remote --rebase
   up = pull --ff-only --all -p
   who = blame
+  worktrees = "worktree list"
 
 [branch]
   autosetuprebase = always
