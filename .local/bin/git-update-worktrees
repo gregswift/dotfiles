@@ -1,0 +1,22 @@
+#!/bin/zsh
+
+# Fetch latest changes
+echo "📥 Fetching latest changes from origin..."
+git fetch --all --prune
+
+# Get all worktrees
+WORKTREES=$(git worktree list | awk '{print $1}' | tail -n +2)
+
+# Iterate over each worktree and update it
+for DIR in $WORKTREES; do
+    echo "🔄 Updating worktree: $DIR"
+    cd "$DIR" || continue
+    BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || echo "detached")
+
+    if [[ "$BRANCH" != "detached" ]]; then
+        git rebase origin/"$BRANCH"
+    fi
+    cd - > /dev/null
+done
+
+echo "✅ All worktrees updated!"
