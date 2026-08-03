@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 #!/bin/sh
 #
 # git-clone-for-worktrees -- clone a repository as a bare repo with its default
@@ -124,3 +125,142 @@ git -C "$REPO_DIR/$DEFAULT" branch --set-upstream-to "origin/$DEFAULT" >/dev/nul
 printf '\n✅ bare repository at %s\n' "$GITDIR"
 printf '   %s checked out at %s\n' "$DEFAULT" "$REPO_DIR/$DEFAULT"
 printf '\n   cd %s && gwt <branch>   to add another\n' "$REPO_DIR/$DEFAULT"
+=======
+#!/bin/zsh
+
+# -----------------------------------------------------------------------------
+# GitHub Repository Clone & Worktree Setup Script (Best Practices)
+# -----------------------------------------------------------------------------
+#
+# This script clones a GitHub repository using `git worktree`, organizing it as:
+#
+# $(CWD)/
+#   ├── githubreponame/          # Repository folder
+#       ├── .git/                # Git metadata (bare repository)
+#       ├── main/                # Primary branch worktree (main or master)
+#       ├── feature-branch-1/    # Other branches as worktrees
+#       ├── feature-branch-2/
+#
+# -----------------------------------------------------------------------------
+#
+# USAGE:
+#   Run this script:
+#
+#   ./git-clone-for-worktrees communityORuser/githubreponame
+#
+# DEPENDENCIES:
+#   - Requires `gh` (GitHub CLI) for detecting the default branch
+#   - Requires `git` for cloning and worktree operations
+#   - Uses `tree` for directory structure (falls back to `ls -A` if missing)
+#
+# FEATURES:
+#   - Automatically detects if the primary branch is `main` or `master`
+#   - Clones the repository as a bare repository
+#   - Creates worktrees for all branches
+#   - Ensures script is run from the correct directory
+#   - Errors out if the repository already exists
+#   - Provides clear error messages and fallbacks
+#
+# -----------------------------------------------------------------------------
+
+# Exit immediately if any command fails
+set -e
+
+# Ensure GitHub CLI (`gh`) is installed
+if ! command -v gh &> /dev/null; then
+    echo "❌ GitHub CLI (gh) not found. Please install it first."
+    exit 1
+fi
+
+# Ensure Git is installed
+if ! command -v git &> /dev/null; then
+    echo "❌ Git not found. Please install Git first."
+    exit 1
+fi
+
+# Check if a repository argument is provided
+if [[ -z "$1" ]]; then
+    echo "❌ Usage: $0 communityORuser/githubreponame"
+    exit 1
+fi
+
+# Extract repository details from argument
+REPO="$1"
+REPO_NAME="${REPO##*/}"         # Extracts 'githubreponame'
+REPO_DIR="${PWD}/${REPO_NAME}"
+
+# Check if the repository directory already exists and prevent overwriting
+if [[ -d "${REPO_DIR}" ]]; then
+    echo "❌ Error: Repository ${REPO_NAME} already exists in ${PWD}/"
+    exit 1
+fi
+
+# Clone the repository as a bare repo inside ".git"
+echo "🚀 Cloning ${REPO} as a bare repository..."
+mkdir -p "${REPO_DIR}"
+git clone --bare "https://github.com/${REPO}.git" "${REPO_DIR}/.git"
+
+# Change into repo directory
+cd "${REPO_DIR}" || exit 1
+
+# A bare clone has no fetch refspec, so no remote-tracking branches (origin/*)
+# get created and local branches can't be configured to track their pull source.
+# Restore the refspec a normal clone would have before fetching.
+git --git-dir=.git config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'
+
+# Fetch all remote branches
+echo "📥 Fetching branch list..."
+git --git-dir=.git fetch --all --prune
+git --git-dir=.git remote set-head origin --auto
+
+# Determine the primary branch (handles both 'main' and 'master')
+echo "🔎 Detecting default branch..."
+
+# First, try using GitHub CLI (preferred method)
+DEFAULT_BRANCH=$(gh repo view "$REPO" --json defaultBranchRef -q .defaultBranchRef.name 2>/dev/null)
+
+# If GitHub CLI fails, fall back to `git symbolic-ref`
+if [[ -z "$DEFAULT_BRANCH" ]]; then
+    DEFAULT_BRANCH=$(git --git-dir=.git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@')
+fi
+
+# If still not found, manually check for 'main' or 'master'
+if [[ -z "$DEFAULT_BRANCH" ]]; then
+    DEFAULT_BRANCH=$(git --git-dir=.git branch -r | grep -E 'origin/main|origin/master' | head -n 1 | awk -F'/' '{print $2}')
+fi
+
+# If still not found, exit with an error
+if [[ -z "$DEFAULT_BRANCH" ]]; then
+    echo "❌ Error: Could not determine the primary branch (main or master)."
+    exit 1
+fi
+
+echo "✅ Primary branch detected: $DEFAULT_BRANCH"
+
+# Create the worktree for the primary branch
+echo "📂 Creating worktree for main branch: $DEFAULT_BRANCH..."
+git worktree add "main" "$DEFAULT_BRANCH"
+git --git-dir=.git branch --set-upstream-to="origin/${DEFAULT_BRANCH}" "$DEFAULT_BRANCH"
+
+# List all branches except the default branch, PR-review refs, and dependabot branches
+BRANCHES=$(git --git-dir=.git for-each-ref --format='%(refname:strip=3)' 'refs/remotes/origin' | grep -Ev "^(${DEFAULT_BRANCH}$|HEAD$|pull/|dependabot/)" || true)
+
+# Create worktrees for each additional branch, tracking its origin counterpart
+for BRANCH in ${(f)BRANCHES}; do
+    echo "📂 Creating worktree for branch: $BRANCH..."
+    git worktree add "$BRANCH" "$BRANCH"
+    git --git-dir=.git branch --set-upstream-to="origin/${BRANCH}" "$BRANCH"
+done
+
+# Display the directory structure
+echo "✅ Worktree setup complete!"
+echo "📂 Directory structure:"
+
+# Check if 'tree' command is available; if not, use 'ls -A'
+if command -v tree &> /dev/null; then
+    tree -ad -L 2 "$REPO_DIR"  # -a ensures hidden files (like .git) are shown
+else
+    echo "⚠️ 'tree' command not found. Showing directory with 'ls -A':"
+    ls -A "$REPO_DIR"
+fi
+>>>>>>> a2ed6e0 (feat(git): Add support scripts for better checking out of repos for use with git worktrees)
