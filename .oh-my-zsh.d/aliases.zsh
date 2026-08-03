@@ -10,11 +10,13 @@ git-new-worktree () {
   git fetch --all -p
   WT_BASE_DIR=$(dirname $(git rev-parse --show-toplevel))
   git worktree add -b ${1} ${WT_BASE_DIR}/${1} && echo "New worktree for branch ${1} created at ${WT_BASE_DIR}/${1}"
+  cd ${WT_BASE_DIR}/${1}
 }
 git-checkout-worktree () {
   git fetch --all -p
   WT_BASE_DIR=$(dirname $(git rev-parse --show-toplevel))
   git worktree add ${WT_BASE_DIR}/${1} ${1} && echo "Branch ${1} checked out to worktree at ${WT_BASE_DIR}/${1}"
+  cd ${WT_BASE_DIR}/${1}
 }
 
 # Other aliases
