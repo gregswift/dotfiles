@@ -1,26 +1,9 @@
 # My Git enablement aliases/functions
-alias git-rebase='git-refresh && git rebase -i $(git merge-base $(git branch -r | awk "/HEAD ->/ { print \$NF }") $(git branch --show-current))'
-alias git-refresh='git fetch --all -p && git rebase $(git branch -r | awk "/HEAD ->/ { print \$NF }")'
-git-refresh-branch () {
-  git fetch --all -p
-  git rebase ${1}
-}
-git-rebase-branch () {
-  git-fresh-branch ${1}
-  git-rebase -i $(git merge-base ${1} $(git branch --show-current))
-}
-git-new-worktree () {
-  git fetch --all -p
-  WT_BASE_DIR=$(dirname $(git rev-parse --show-toplevel))
-  git worktree add -b ${1} ${WT_BASE_DIR}/${1} && echo "New worktree for branch ${1} created at ${WT_BASE_DIR}/${1}"
-  cd ${WT_BASE_DIR}/${1}
-}
-git-checkout-worktree () {
-  git fetch --all -p
-  WT_BASE_DIR=$(dirname $(git rev-parse --show-toplevel))
-  git worktree add ${WT_BASE_DIR}/${1} ${1} && echo "Branch ${1} checked out to worktree at ${WT_BASE_DIR}/${1}"
-  cd ${WT_BASE_DIR}/${1}
-}
+gwt() { local d; d=$(git new-worktree "$@") || return; cd "$d"; }
+
+alias git-rebase='printf "use: git refresh -i\n" >&2; false'
+alias git-new-worktree='printf "use: gwt <branch>  (git new-worktree does not cd)\n" >&2; false'
+alias git-checkout-worktree='printf "use: gwt <branch>  (it checks out an existing branch too)\n" >&2; false'
 
 # Other aliases
 KUBECOLOR=$(which kubecolor 2> /dev/null)

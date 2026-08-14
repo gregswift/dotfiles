@@ -1,0 +1,144 @@
+#!/bin/sh
+#
+# git-refresh -- fetch, sync the fork, and rebase the current branch.
+#
+# Reachable as `git refresh` as well as by its own name: git looks for a
+# `git-refresh` in PATH before it consults aliases, so no alias is needed.
+#
+# When an `upstream` remote exists the first step fast-forwards origin's default
+# branch from upstream's. Everything after that is a plain origin-based
+# workflow, which is what the rest of these scripts assume.
+
+set -eu
+
+# `git refresh` (dashed external) and an alias path reach a script differently:
+# the alias path exports GIT_DIR pointing at whichever worktree git was invoked
+# from, which would silently retarget every git call below. Scrub it so both
+# entry points act on the worktree the caller is standing in.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX
+
+PROG=$(basename "$0")
+INTERACTIVE=0
+BASE_ARG=""
+
+usage() {
+    cat <<EOF
+Usage: git refresh [-i|--interactive] [<base>]
+
+Fetches from every remote, fast-forwards origin's default branch from upstream's
+(when an \`upstream\` remote exists), then rebases the current branch onto the
+base branch of its open pull request, or onto the default branch if it has none.
+
+  <base>  Rebase onto this instead. A bare name is looked up under origin first,
+          so \`git refresh foo\` means origin/foo.
+
+Options:
+  -i, --interactive   Follow the rebase with an interactive pass over the
+                      commits this branch adds to <base>.
+  -h, --help          This text.
+EOF
+}
+
+die() { printf '❌ %s\n' "$*" >&2; exit 1; }
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -i|--interactive) INTERACTIVE=1 ;;
+        -h|--help)        usage; exit 0 ;;
+        --)               shift; break ;;
+        -*)               printf '%s: unknown option: %s\n' "$PROG" "$1" >&2; usage >&2; exit 2 ;;
+        *)                [ -z "$BASE_ARG" ] || die "expected at most one base, got '$BASE_ARG' and '$1'"
+                          BASE_ARG=$1 ;;
+    esac
+    shift
+done
+# Anything left is what followed `--`.
+if [ $# -gt 0 ]; then
+    [ -z "$BASE_ARG" ] || die "expected at most one base"
+    BASE_ARG=$1
+    shift
+    [ $# -eq 0 ] || die "expected at most one base"
+fi
+
+command -v git >/dev/null 2>&1 || die "git not found in PATH"
+git rev-parse --git-dir >/dev/null 2>&1 || die "not inside a git repository"
+
+BRANCH=$(git branch --show-current)
+[ -n "$BRANCH" ] || die "detached HEAD; check out a branch first"
+
+# Untracked files are none of a rebase's business; tracked changes are.
+git diff --quiet && git diff --cached --quiet \
+    || die "you have uncommitted changes; commit or stash them first"
+
+has_remote() { git remote | grep -x "$1" >/dev/null 2>&1; }
+
+# The default branch of a remote, by name and without the remote prefix.
+remote_head() {
+    _ref=$(git symbolic-ref --quiet --short "refs/remotes/$1/HEAD" 2>/dev/null) || _ref=""
+    if [ -z "$_ref" ]; then
+        git remote set-head "$1" --auto >/dev/null 2>&1 || true
+        _ref=$(git symbolic-ref --quiet --short "refs/remotes/$1/HEAD" 2>/dev/null) || _ref=""
+    fi
+    printf '%s' "${_ref#"$1"/}"
+}
+
+printf '📥 Fetching...\n'
+git fetch --all --prune
+
+DEF=$(remote_head origin)
+[ -n "$DEF" ] || die "cannot resolve origin/HEAD; run: git remote set-head origin --auto"
+
+if has_remote upstream; then
+    if ! git rev-parse --verify --quiet "refs/remotes/upstream/$DEF" >/dev/null; then
+        printf '⚠️  upstream has no %s; leaving origin/%s alone\n' "$DEF" "$DEF" >&2
+    # Braces are load-bearing: a zsh reader would take `$DEF:r` as a modifier.
+    elif PUSH_OUT=$(git push origin "upstream/${DEF}:refs/heads/${DEF}" 2>&1); then
+        # A successful push updates refs/remotes/origin/$DEF too, so no re-fetch.
+        case "$PUSH_OUT" in
+            *'Everything up-to-date'*) printf '➖ origin/%s already matches upstream\n' "$DEF" ;;
+            *)                         printf '⬆️  origin/%s fast-forwarded from upstream\n' "$DEF" ;;
+        esac
+    else
+        # Not fatal: the origin-based workflow below still works, just on a base
+        # that is behind upstream. Say so rather than failing the whole run.
+        printf '⚠️  origin/%s has diverged from upstream/%s; using origin as-is\n' "$DEF" "$DEF" >&2
+    fi
+fi
+
+if [ -n "$BASE_ARG" ]; then
+    if git rev-parse --verify --quiet "refs/remotes/origin/$BASE_ARG" >/dev/null; then
+        BASE="origin/$BASE_ARG"
+    elif git rev-parse --verify --quiet "$BASE_ARG" >/dev/null; then
+        BASE=$BASE_ARG
+    else
+        die "no such base: $BASE_ARG"
+    fi
+    WHY=""
+else
+    # For a stacked branch the right base is its PR's target, not the default
+    # branch: rebasing onto the default flattens the branch below it away.
+    PRBASE=""
+    if command -v gh >/dev/null 2>&1; then
+        PRBASE=$(gh pr view "$BRANCH" --json baseRefName,state \
+                    --jq 'select(.state == "OPEN") | .baseRefName' 2>/dev/null) || PRBASE=""
+    fi
+
+    if [ -z "$PRBASE" ]; then
+        BASE="origin/$DEF"
+        command -v gh >/dev/null 2>&1 && WHY=" (no open PR)" || WHY=" (gh not found)"
+    elif git rev-parse --verify --quiet "refs/remotes/origin/$PRBASE" >/dev/null; then
+        BASE="origin/$PRBASE"
+        WHY=" (open PR base)"
+    else
+        die "PR targets $PRBASE but origin/$PRBASE is not fetched"
+    fi
+fi
+
+printf '🔀 Rebasing %s onto %s%s\n' "$BRANCH" "$BASE" "$WHY"
+git rebase "$BASE"
+
+if [ "$INTERACTIVE" -eq 1 ]; then
+    MERGE_BASE=$(git merge-base "$BASE" HEAD)
+    printf '✏️  Interactive rebase from %s\n' "$(git rev-parse --short "$MERGE_BASE")"
+    git rebase -i "$MERGE_BASE"
+fi
