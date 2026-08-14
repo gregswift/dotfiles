@@ -1,22 +1,240 @@
-#!/bin/zsh
+#!/bin/sh
+#
+# git-update-worktrees -- rebase every worktree onto the right base.
+#
+# For stacked branches the correct base is the target branch of the branch's
+# open pull request, not origin/<same-name>. This script asks `gh` for that
+# base and rebases with --update-refs so the rest of the stack follows along.
+#
+# A branch with no open PR is skipped rather than rebased onto the default
+# branch: an unopened stack would be silently flattened onto main.
+#
+# Rebases run with rerere disabled. These attempts are speculative and are
+# thrown away on conflict, so they have no business teaching rerere anything.
 
-# Fetch latest changes
-echo "📥 Fetching latest changes from origin..."
-git fetch --all --prune
+set -eu
 
-# Get all worktrees
-WORKTREES=$(git worktree list | awk '{print $1}' | tail -n +2)
+VERBOSE=0
+DRY_RUN=0
+PROG=$(basename "$0")
 
-# Iterate over each worktree and update it
-for DIR in $WORKTREES; do
-    echo "🔄 Updating worktree: $DIR"
-    cd "$DIR" || continue
-    BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || echo "detached")
+usage() {
+    cat <<EOF
+Usage: git update-worktrees [-n|--dry-run] [-v|--verbose]
 
-    if [[ "$BRANCH" != "detached" ]]; then
-        git rebase origin/"$BRANCH"
-    fi
-    cd - > /dev/null
+Fetches from origin, then rebases each worktree onto the base branch of its
+open pull request (via gh). Stacked branches follow their PR target.
+
+One line per worktree, a summary, then the list of worktrees needing you.
+
+Options:
+  -n, --dry-run   Show what would happen; run no rebases.
+  -v, --verbose   Also print git's own rebase output.
+  -h, --help      This text.
+
+Exit status is 1 if any rebase conflicted.
+EOF
+}
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -n|--dry-run) DRY_RUN=1 ;;
+        -v|--verbose) VERBOSE=1 ;;
+        -h|--help)    usage; exit 0 ;;
+        *)            printf '%s: unknown option: %s\n' "$PROG" "$1" >&2; usage >&2; exit 2 ;;
+    esac
+    shift
 done
 
-echo "✅ All worktrees updated!"
+die() { printf '❌ %s\n' "$*" >&2; exit 1; }
+
+command -v git >/dev/null 2>&1 || die "git not found in PATH"
+command -v gh  >/dev/null 2>&1 || die "gh not found in PATH; it is how base branches are resolved"
+git rev-parse --git-dir >/dev/null 2>&1 || die "not inside a git repository"
+
+REPO=$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null) || REPO=""
+[ -n "$REPO" ] || die "gh cannot resolve this repository"
+
+# --update-refs landed in git 2.38; without it stacked branches are left behind.
+REBASE_OPTS="--update-refs"
+GIT_VER=$(git version | awk '{print $3}')
+GIT_MAJOR=${GIT_VER%%.*}
+GIT_REST=${GIT_VER#*.}
+GIT_MINOR=${GIT_REST%%.*}
+if [ "$GIT_MAJOR" -lt 2 ] || { [ "$GIT_MAJOR" -eq 2 ] && [ "$GIT_MINOR" -lt 38 ]; }; then
+    printf '⚠️  git %s has no --update-refs; stacked branches will not be carried along\n' \
+        "$GIT_VER" >&2
+    REBASE_OPTS=""
+fi
+
+default_branch() {
+    ref=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null) || ref=""
+    if [ -z "$ref" ]; then
+        git remote set-head origin --auto >/dev/null 2>&1 || true
+        ref=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null) || ref=""
+    fi
+    [ -n "$ref" ] || die "cannot resolve origin/HEAD; run: git remote set-head origin --auto"
+    printf '%s\n' "${ref#origin/}"
+}
+
+# Emit "<branch-or-dash><TAB><path>" per non-bare worktree. Dash means detached.
+list_worktrees() {
+    git worktree list --porcelain | awk '
+        /^worktree /  { path = substr($0, 10); branch = ""; bare = 0; det = 0; next }
+        /^bare$/      { bare = 1; next }
+        /^detached$/  { det = 1; next }
+        /^branch /    { branch = substr($0, 8); sub(/^refs\/heads\//, "", branch); next }
+        /^$/          { if (path != "" && !bare) printf "%s\t%s\n", (det ? "-" : branch), path
+                        path = "" }
+    '
+}
+
+TMPDIR_RUN=$(mktemp -d) || die "cannot create temp dir"
+trap 'rm -rf "$TMPDIR_RUN"' EXIT INT TERM
+WORK="$TMPDIR_RUN/worktrees"
+BASES="$TMPDIR_RUN/bases"
+NEEDS="$TMPDIR_RUN/needs"
+OUT="$TMPDIR_RUN/out"
+: >"$NEEDS"
+
+printf '📥 Fetching from origin...\n'
+if [ "$DRY_RUN" -eq 1 ]; then
+    git fetch --all --prune --dry-run
+else
+    git fetch --all --prune
+fi
+
+# One query for every open PR beats one query per worktree: it is a single
+# round trip and cannot be misread as "no PR" when a call gets throttled.
+gh pr list -R "$REPO" --state open --limit 1000 \
+    --json headRefName,baseRefName \
+    --jq '.[] | [.headRefName, .baseRefName] | @tsv' >"$BASES" \
+    || die "gh pr list failed; refusing to guess bases"
+
+DEFAULT=$(default_branch)
+TAB=$(printf '\t')
+
+pr_base() {
+    awk -F"$TAB" -v b="$1" '$1 == b { print $2; exit }' "$BASES"
+}
+
+# status word -> emoji, kept in one place so the columns stay aligned
+row() {
+    _icon=$1; _status=$2; _branch=$3; _detail=$4
+    printf '%s %-9s %-44s %s\n' "$_icon" "$_status" "$_branch" "$_detail"
+}
+
+list_worktrees >"$WORK"
+
+N_REBASED=0; N_CURRENT=0; N_CONFLICT=0; N_DIRTY=0; N_NOPR=0; N_OTHER=0; N_TOTAL=0; N_WOULD=0
+
+while IFS="$TAB" read -r BRANCH DIR; do
+    [ -n "${DIR:-}" ] || continue
+    N_TOTAL=$((N_TOTAL + 1))
+    NAME=$(basename "$DIR")
+
+    if [ "$BRANCH" = "-" ]; then
+        row "⏭️ " "detached" "$NAME" "detached HEAD"
+        N_OTHER=$((N_OTHER + 1))
+        continue
+    fi
+
+    if [ ! -d "$DIR" ]; then
+        row "⏭️ " "gone" "$BRANCH" "directory missing, see git prune-worktrees"
+        N_OTHER=$((N_OTHER + 1))
+        continue
+    fi
+
+    STATUS_OUT=$(git -C "$DIR" status --porcelain)
+    if [ -n "$STATUS_OUT" ]; then
+        COUNT=$(printf '%s\n' "$STATUS_OUT" | wc -l | tr -d ' ')
+        if printf '%s\n' "$STATUS_OUT" | grep -qv '^??'; then KIND=modified; else KIND=untracked; fi
+        row "⏭️ " "dirty" "$BRANCH" "$COUNT $KIND"
+        N_DIRTY=$((N_DIRTY + 1))
+        continue
+    fi
+
+    if [ "$BRANCH" = "$DEFAULT" ]; then
+        if [ "$DRY_RUN" -eq 1 ]; then
+            row "🔄" "would ff" "$BRANCH" "→ origin/$DEFAULT"
+            N_WOULD=$((N_WOULD + 1))
+        elif git -C "$DIR" merge --ff-only "origin/$DEFAULT" >"$OUT" 2>&1; then
+            if grep -q 'Already up to date' "$OUT"; then
+                row "➖" "current" "$BRANCH" "→ origin/$DEFAULT"
+                N_CURRENT=$((N_CURRENT + 1))
+            else
+                row "✅" "updated" "$BRANCH" "→ origin/$DEFAULT"
+                N_REBASED=$((N_REBASED + 1))
+            fi
+            [ "$VERBOSE" -eq 1 ] && cat "$OUT"
+        else
+            row "❌" "diverged" "$BRANCH" "not a fast-forward, left alone"
+            printf '%s\t%s\t%s\t%s\n' "$BRANCH" "origin/$DEFAULT" "$DIR" "not a fast-forward" >>"$NEEDS"
+            N_CONFLICT=$((N_CONFLICT + 1))
+        fi
+        continue
+    fi
+
+    BASE=$(pr_base "$BRANCH")
+    if [ -z "$BASE" ]; then
+        row "⏭️ " "no PR" "$BRANCH" ""
+        N_NOPR=$((N_NOPR + 1))
+        continue
+    fi
+
+    if ! git rev-parse --verify --quiet "refs/remotes/origin/$BASE" >/dev/null; then
+        row "⏭️ " "no base" "$BRANCH" "PR base origin/$BASE not fetched"
+        N_OTHER=$((N_OTHER + 1))
+        continue
+    fi
+
+    if [ "$DRY_RUN" -eq 1 ]; then
+        row "🔄" "would" "$BRANCH" "→ origin/$BASE"
+        N_WOULD=$((N_WOULD + 1))
+        continue
+    fi
+
+    # shellcheck disable=SC2086  # REBASE_OPTS is an intentional word list
+    if git -C "$DIR" -c rerere.enabled=false rebase $REBASE_OPTS "origin/$BASE" >"$OUT" 2>&1; then
+        if grep -q 'is up to date' "$OUT"; then
+            row "➖" "current" "$BRANCH" "→ origin/$BASE"
+            N_CURRENT=$((N_CURRENT + 1))
+        else
+            row "✅" "rebased" "$BRANCH" "→ origin/$BASE"
+            N_REBASED=$((N_REBASED + 1))
+        fi
+        [ "$VERBOSE" -eq 1 ] && cat "$OUT"
+    else
+        UNMERGED=$(git -C "$DIR" diff --name-only --diff-filter=U 2>/dev/null || true)
+        NFILES=$(printf '%s' "$UNMERGED" | grep -c . || true)
+        SAMPLE=$(printf '%s\n' "$UNMERGED" | grep . | head -3 | tr '\n' ' ')
+        [ "$NFILES" -gt 3 ] && SAMPLE="$SAMPLE(+$((NFILES - 3)) more)"
+        git -C "$DIR" -c rerere.enabled=false rebase --abort >/dev/null 2>&1 || true
+        [ "$NFILES" -eq 1 ] && NOUN=file || NOUN=files
+        row "❌" "conflict" "$BRANCH" "→ origin/$BASE ($NFILES $NOUN)"
+        printf '%s\t%s\t%s\t%s\n' "$BRANCH" "origin/$BASE" "$DIR" "$SAMPLE" >>"$NEEDS"
+        N_CONFLICT=$((N_CONFLICT + 1))
+        [ "$VERBOSE" -eq 1 ] && cat "$OUT"
+    fi
+done <"$WORK"
+
+SUMMARY=""
+add_summary() { [ "$1" -gt 0 ] && SUMMARY="$SUMMARY, $1 $2"; return 0; }
+add_summary "$N_WOULD"    "to rebase"
+add_summary "$N_REBASED"  "rebased"
+add_summary "$N_CURRENT"  "current"
+add_summary "$N_CONFLICT" "conflicted"
+add_summary "$N_DIRTY"    "dirty"
+add_summary "$N_NOPR"     "no open PR"
+add_summary "$N_OTHER"    "other"
+printf '\n%s worktrees: %s\n' "$N_TOTAL" "${SUMMARY#, }"
+
+if [ -s "$NEEDS" ]; then
+    printf '\nNeeds you (%s):\n' "$N_CONFLICT"
+    while IFS="$TAB" read -r B BASE WTDIR FILES; do
+        printf '  %s\n' "$B"
+        printf '      %s\n' "$FILES"
+        printf '      cd %s && git rebase %s\n' "$WTDIR" "$BASE"
+    done <"$NEEDS"
+    exit 1
+fi

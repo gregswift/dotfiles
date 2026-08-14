@@ -16,13 +16,15 @@
 [alias]
   lg = log --pretty=format:'%C(yellow)%h%C(reset) %C(cyan)%cI%C(reset) %s %C(blue)%an%C(reset) %C(green)%d%C(reset)' --graph
   commend = commit --amend --no-edit
+  check-trees = "!git-prune-worktrees"
   please = push --force-with-lease
   praise = blame
-  prunetrees = "worktree prune"
+  prune-trees = "!git-prune-worktrees --yes"
   review = log --summary --patch --stat=100 --dirstat --ignore-all-space --reverse --decorate --find-renames=33 --find-copies-harder --cc
   supdate = submodule update --init --rebase
   supgrade = submodule update --init --remote --rebase
   up = pull --ff-only --all -p
+  update-worktrees = "!git-update-worktrees"
   uw = "!git-update-worktrees"
   who = blame
   worktrees = "worktree list"
