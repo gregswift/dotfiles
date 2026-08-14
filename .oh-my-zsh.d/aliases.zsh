@@ -1,9 +1,12 @@
 # My Git enablement aliases/functions
 alias git-rebase='git-refresh && git rebase -i $(git merge-base $(git branch -r | awk "/HEAD ->/ { print \$NF }") $(git branch --show-current))'
 alias git-refresh='git fetch --all -p && git rebase $(git branch -r | awk "/HEAD ->/ { print \$NF }")'
-git-rebase-branch () {
+git-refresh-branch () {
   git fetch --all -p
   git rebase ${1}
+}
+git-rebase-branch () {
+  git-fresh-branch ${1}
   git-rebase -i $(git merge-base ${1} $(git branch --show-current))
 }
 git-new-worktree () {
