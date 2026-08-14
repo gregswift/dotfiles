@@ -1,129 +1,126 @@
-#!/bin/zsh
-
-# -----------------------------------------------------------------------------
-# GitHub Repository Clone & Worktree Setup Script (Best Practices)
-# -----------------------------------------------------------------------------
+#!/bin/sh
 #
-# This script clones a GitHub repository using `git worktree`, organizing it as:
+# git-clone-for-worktrees -- clone a repository as a bare repo with its default
+# branch checked out beside it, ready for `git new-worktree` to add the rest.
 #
-# $(CWD)/
-#   ├── githubreponame/          # Repository folder
-#       ├── .git/                # Git metadata (bare repository)
-#       ├── main/                # Primary branch worktree (main or master)
-#       ├── feature-branch-1/    # Other branches as worktrees
-#       ├── feature-branch-2/
+#   <repo>/
+#     .git/     the bare repository
+#     main/     a worktree for the default branch
 #
-# -----------------------------------------------------------------------------
+# Reachable as `git clone-for-worktrees` as well as by its own name.
 #
-# USAGE:
-#   Run this script:
-#
-#   ./git-clone-for-worktrees communityORuser/githubreponame
-#
-# DEPENDENCIES:
-#   - Requires `gh` (GitHub CLI) for detecting the default branch
-#   - Requires `git` for cloning and worktree operations
-#   - Uses `tree` for directory structure (falls back to `ls -A` if missing)
-#
-# FEATURES:
-#   - Automatically detects if the primary branch is `main` or `master`
-#   - Clones the repository as a bare repository
-#   - Creates worktrees for all branches
-#   - Ensures script is run from the correct directory
-#   - Errors out if the repository already exists
-#   - Provides clear error messages and fallbacks
-#
-# -----------------------------------------------------------------------------
+# Only the default branch is checked out. Every other branch is a worktree you
+# add when you want it, rather than one directory per branch the remote happens
+# to have.
 
-# Exit immediately if any command fails
-set -e
+set -eu
 
-# Ensure GitHub CLI (`gh`) is installed
-if ! command -v gh &> /dev/null; then
-    echo "❌ GitHub CLI (gh) not found. Please install it first."
-    exit 1
-fi
+# Nothing here should act on a repository the caller happens to be standing in.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX
 
-# Ensure Git is installed
-if ! command -v git &> /dev/null; then
-    echo "❌ Git not found. Please install Git first."
-    exit 1
-fi
+PROG=$(basename "$0")
+UPSTREAM_SPEC=""
 
-# Check if a repository argument is provided
-if [[ -z "$1" ]]; then
-    echo "❌ Usage: $0 communityORuser/githubreponame"
-    exit 1
-fi
+usage() {
+    cat <<EOF
+Usage: git clone-for-worktrees <repo> [--upstream <repo>]
 
-# Extract repository details from argument
-REPO="$1"
-REPO_NAME="${REPO##*/}"         # Extracts 'githubreponame'
-REPO_DIR="${PWD}/${REPO_NAME}"
+Clones <repo> into ./<name>/.git as a bare repository and checks its default
+branch out to ./<name>/<branch>. Add further branches with \`gwt <branch>\`.
 
-# Check if the repository directory already exists and prevent overwriting
-if [[ -d "${REPO_DIR}" ]]; then
-    echo "❌ Error: Repository ${REPO_NAME} already exists in ${PWD}/"
-    exit 1
-fi
+  <repo>  owner/name, or any URL git understands. A bare owner/name becomes
+          an ssh URL: git@github.com:owner/name.git
 
-# Clone the repository as a bare repo inside ".git"
-echo "🚀 Cloning ${REPO} as a bare repository..."
-mkdir -p "${REPO_DIR}"
-git clone --bare "https://github.com/${REPO}.git" "${REPO_DIR}/.git"
+Options:
+  --upstream <repo>  Add this as the \`upstream\` remote. When <repo> is a
+                     GitHub fork and gh is installed, its parent is used
+                     automatically and this is only needed to override.
+  -h, --help         This text.
+EOF
+}
 
-# Change into repo directory
-cd "${REPO_DIR}" || exit 1
+die() { printf '❌ %s\n' "$*" >&2; exit 1; }
 
-# Fetch all remote branches
-echo "📥 Fetching branch list..."
-git --git-dir=.git fetch --all --prune
-
-# Determine the primary branch (handles both 'main' and 'master')
-echo "🔎 Detecting default branch..."
-
-# First, try using GitHub CLI (preferred method)
-DEFAULT_BRANCH=$(gh repo view "$REPO" --json defaultBranchRef -q .defaultBranchRef.name 2>/dev/null)
-
-# If GitHub CLI fails, fall back to `git symbolic-ref`
-if [[ -z "$DEFAULT_BRANCH" ]]; then
-    DEFAULT_BRANCH=$(git --git-dir=.git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@')
-fi
-
-# If still not found, manually check for 'main' or 'master'
-if [[ -z "$DEFAULT_BRANCH" ]]; then
-    DEFAULT_BRANCH=$(git --git-dir=.git branch -r | grep -E 'origin/main|origin/master' | head -n 1 | awk -F'/' '{print $2}')
-fi
-
-# If still not found, exit with an error
-if [[ -z "$DEFAULT_BRANCH" ]]; then
-    echo "❌ Error: Could not determine the primary branch (main or master)."
-    exit 1
-fi
-
-echo "✅ Primary branch detected: $DEFAULT_BRANCH"
-
-# Create the worktree for the primary branch
-echo "📂 Creating worktree for main branch: $DEFAULT_BRANCH..."
-git worktree add "main" "$DEFAULT_BRANCH"
-
-# List all branches except the default branch
-BRANCHES=$(git --git-dir=.git branch -r | grep -Ev "origin/($DEFAULT_BRANCH|pull)" | sed 's/origin\///')
-
-# Create worktrees for each additional branch
-for BRANCH in $BRANCHES; do
-    echo "📂 Creating worktree for branch: $BRANCH..."
-    git worktree add "$BRANCH" "$BRANCH"
+REPO_SPEC=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --upstream) [ $# -ge 2 ] || die "--upstream needs a repository"
+                    UPSTREAM_SPEC=$2; shift ;;
+        -h|--help)  usage; exit 0 ;;
+        -*)         printf '%s: unknown option: %s\n' "$PROG" "$1" >&2; usage >&2; exit 2 ;;
+        *)          [ -z "$REPO_SPEC" ] || die "expected one repository, got '$REPO_SPEC' and '$1'"
+                    REPO_SPEC=$1 ;;
+    esac
+    shift
 done
+[ -n "$REPO_SPEC" ] || { usage >&2; exit 2; }
 
-# Display the directory structure
-echo "✅ Worktree setup complete!"
-echo "📂 Directory structure:"
+command -v git >/dev/null 2>&1 || die "git not found in PATH"
 
-# Check if 'tree' command is available; if not, use 'ls -A'
-if command -v tree &> /dev/null; then
-    tree -a -L 2 "$REPO_DIR"  # -a ensures hidden files (like .git) are shown
-else
-    echo "⚠️ 'tree' command not found. Showing directory with 'ls -A':"
-    ls -A "$REPO_DIR"
+# owner/name is the common case and gets an ssh URL. A scheme, an scp-style
+# host, or a filesystem path is already something git can clone, so it is passed
+# through untouched.
+is_owner_name() {
+    case "$1" in
+        *://*|*@*:*|/*|./*|../*|~/*) return 1 ;;
+        */*)                         return 0 ;;
+        *)                           return 1 ;;
+    esac
+}
+
+url_of() {
+    if is_owner_name "$1"; then
+        printf 'git@github.com:%s.git' "${1%.git}"
+    else
+        case "$1" in
+            *://*|*@*:*|/*|./*|../*|~/*) printf '%s' "$1" ;;
+            *) die "cannot tell what repository '$1' means; use owner/name or a URL" ;;
+        esac
+    fi
+}
+
+REPO_NAME=${REPO_SPEC%.git}
+REPO_NAME=${REPO_NAME##*/}
+REPO_DIR="$PWD/$REPO_NAME"
+GITDIR="$REPO_DIR/.git"
+[ ! -e "$REPO_DIR" ] || die "$REPO_DIR already exists"
+
+# gh knows the parent of a fork, which is the one thing git cannot work out from
+# the URL. It is not required: without it, --upstream still names one by hand.
+if [ -z "$UPSTREAM_SPEC" ] && command -v gh >/dev/null 2>&1 && is_owner_name "$REPO_SPEC"; then
+    UPSTREAM_SPEC=$(gh repo view "$REPO_SPEC" --json isFork,parent \
+        --jq 'if .isFork then .parent.owner.login + "/" + .parent.name else empty end' \
+        2>/dev/null) || UPSTREAM_SPEC=""
+    [ -z "$UPSTREAM_SPEC" ] || printf '🍴 %s is a fork of %s\n' "$REPO_SPEC" "$UPSTREAM_SPEC"
 fi
+
+printf '🚀 Cloning %s\n' "$(url_of "$REPO_SPEC")"
+mkdir -p "$REPO_DIR"
+git clone --bare "$(url_of "$REPO_SPEC")" "$GITDIR"
+
+# A bare clone leaves remote.origin.fetch unset, so refs/remotes/origin/* stays
+# empty and every later fetch brings back nothing. The worktrees need those refs
+# to track against, so give origin the refspec a normal clone would have.
+git -C "$GITDIR" config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'
+git -C "$GITDIR" fetch --prune origin
+
+if [ -n "$UPSTREAM_SPEC" ]; then
+    git -C "$GITDIR" remote add upstream "$(url_of "$UPSTREAM_SPEC")"
+    git -C "$GITDIR" fetch --prune upstream
+    printf '🔗 upstream: %s\n' "$(url_of "$UPSTREAM_SPEC")"
+fi
+
+git -C "$GITDIR" remote set-head origin --auto >/dev/null 2>&1 \
+    || die "origin has no branches, so there is no default branch to check out"
+DEFAULT=$(git -C "$GITDIR" symbolic-ref --short refs/remotes/origin/HEAD)
+DEFAULT=${DEFAULT#origin/}
+
+git -C "$GITDIR" worktree add "$REPO_DIR/$DEFAULT" "$DEFAULT"
+
+# A bare clone copies branches into refs/heads with no upstream, so the checkout
+# would sit there disconnected from the origin branch it was made from.
+git -C "$REPO_DIR/$DEFAULT" branch --set-upstream-to "origin/$DEFAULT" >/dev/null
+
+printf '\n✅ bare repository at %s\n' "$GITDIR"
+printf '   %s checked out at %s\n' "$DEFAULT" "$REPO_DIR/$DEFAULT"
+printf '\n   cd %s && gwt <branch>   to add another\n' "$REPO_DIR/$DEFAULT"
