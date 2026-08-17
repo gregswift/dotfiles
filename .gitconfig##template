@@ -24,7 +24,6 @@
   supdate = submodule update --init --rebase
   supgrade = submodule update --init --remote --rebase
   up = pull --ff-only --all -p
-  uw = "!git-update-worktrees"
   who = blame
   worktrees = "worktree list"
 

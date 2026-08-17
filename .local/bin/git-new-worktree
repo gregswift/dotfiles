@@ -186,6 +186,9 @@ else
     # origin/<its own name>, set by the first `git push -u`. What a wrong
     # upstream costs depends on push.default, so do not leave one behind.
     git worktree add --no-track -b "$BRANCH" "$DIR" "$BASE" >&2
+    # The moment the base is known for certain. Without it a branch has no base
+    # until its PR exists, and `git refresh --all` has nothing to rebase it onto.
+    git config "branch.$BRANCH.base" "${BASE#origin/}"
     printf '📂 %s created at %s from %s\n' "$BRANCH" "$DIR" "$BASE" >&2
 fi
 
