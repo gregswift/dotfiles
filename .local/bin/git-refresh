@@ -364,6 +364,16 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
         N_DIRTY=$((N_DIRTY + 1)); continue
     fi
 
+    if git rev-parse --verify --quiet "refs/remotes/origin/$BASE" >/dev/null; then
+        REF="origin/$BASE"
+    elif git rev-parse --verify --quiet "$BASE" >/dev/null; then
+        REF=$BASE
+    else
+        row "⏭️ " "no base" "$BRANCH" "$BASE is not fetched"
+        printf '%s\t%s\n' "$BRANCH" "$DIR" >>"$NOBASE"
+        N_NOBASE=$((N_NOBASE + 1)); continue
+    fi
+
     # A branch can be stale against its own remote, not just against its base:
     # someone rebases it elsewhere and force-pushes, leaving these commits as
     # patch-identical orphans. Rebasing those onto the base replays work that
@@ -380,16 +390,22 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
             SYNCKIND=""
         elif git -C "$DIR" merge-base --is-ancestor HEAD "origin/$BRANCH" 2>/dev/null; then
             SYNCKIND=ff
-        elif ! git -C "$DIR" cherry "origin/$BRANCH" "$BRANCH" | grep '^+' >/dev/null 2>&1; then
-            # Every local commit is upstream by patch, whatever its hash.
+        # Limited to this branch's own commits. Rebasing locally onto a newer
+        # base pulls that base's commits into origin/<branch>..HEAD, and an
+        # unlimited cherry counts every one of them as work of this branch's
+        # own -- hundreds of them, on a branch whose only commits are already
+        # upstream. That reads as "hands off" for exactly the branch most in
+        # need of adopting its remote.
+        elif ! git -C "$DIR" cherry "origin/$BRANCH" "$BRANCH" "$REF" | grep '^+' >/dev/null 2>&1; then
+            # Every commit of its own is upstream by patch, whatever its hash.
             SYNCKIND=reset
         else
             # Real local work under a rewritten remote. Which side wins is a
             # judgement about intent, so it is reported and left alone.
             SYNCKIND=""
             printf '%s\t%s\t%s\n' "$BRANCH" \
-                "has commits origin/$BRANCH does not, and was rewritten underneath them" \
-                "cd $DIR && git log --oneline origin/$BRANCH..$BRANCH" >>"$NEEDS"
+                "has commits of its own that origin/$BRANCH lacks, and was rewritten underneath them" \
+                "cd $DIR && git cherry -v origin/$BRANCH $BRANCH $REF" >>"$NEEDS"
             N_DIVERGED=$((N_DIVERGED + 1))
         fi
 
@@ -404,16 +420,6 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
             SYNCNOTE=", adopted origin/$BRANCH"
             N_SYNCED=$((N_SYNCED + 1))
         fi
-    fi
-
-    if git rev-parse --verify --quiet "refs/remotes/origin/$BASE" >/dev/null; then
-        REF="origin/$BASE"
-    elif git rev-parse --verify --quiet "$BASE" >/dev/null; then
-        REF=$BASE
-    else
-        row "⏭️ " "no base" "$BRANCH" "$BASE is not fetched"
-        printf '%s\t%s\n' "$BRANCH" "$DIR" >>"$NOBASE"
-        N_NOBASE=$((N_NOBASE + 1)); continue
     fi
 
     if [ "$DRY_RUN" -eq 1 ]; then
