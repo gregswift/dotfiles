@@ -39,6 +39,7 @@ BASE_ARG=""
 # left alone and an explicit --no-... still wins over config.
 PUSH=""
 PRUNE=""
+SYNC=""
 
 usage() {
     cat <<EOF
@@ -63,6 +64,9 @@ Options:
   --prune         Remove worktrees whose branch is gone from origin and was
                   merged. Never touches one with changes, one you are standing
                   in, or one with no sign of having been merged.
+  --sync          Adopt origin/<branch> before rebasing, when this branch was
+                  rewritten elsewhere and holds nothing origin lacks. A branch
+                  with commits of its own is reported, never overwritten.
   --doctor        Print what to do about anything that needs you: branches
                   that would clash, ones with no base, worktrees held back
                   from pruning. Implies --dry-run and changes nothing, so a
@@ -70,11 +74,12 @@ Options:
                   merges the two tips where a rebase replays each commit.
   -h, --help      This text.
 
-Both of these can be turned on for good, and off again for one run with
---no-please or --no-prune:
+These can be turned on for good, and off again for one run with --no-please,
+--no-prune or --no-sync:
 
   refresh.pushWithLease     bool, same as --please
   refresh.pruneWorktrees    bool, same as --prune
+  refresh.syncStale         bool, same as --sync
 
 Exit status is 1 if any rebase conflicted or any push was refused.
 EOF
@@ -92,6 +97,8 @@ while [ $# -gt 0 ]; do
         --no-push-with-lease|--no-please) PUSH=0 ;;
         --prune)      PRUNE=1 ;;
         --no-prune)   PRUNE=0 ;;
+        --sync)       SYNC=1 ;;
+        --no-sync)    SYNC=0 ;;
         --doctor)     DOCTOR=1 ;;
         -h|--help)    usage; exit 0 ;;
         --)           shift; break ;;
@@ -126,6 +133,7 @@ config_bool() {
 }
 [ -n "$PUSH" ]  || PUSH=$(config_bool refresh.pushWithLease)
 [ -n "$PRUNE" ] || PRUNE=$(config_bool refresh.pruneWorktrees)
+[ -n "$SYNC" ]  || SYNC=$(config_bool refresh.syncStale)
 
 # Asking what is wrong is not asking for it to be changed.
 [ "$DOCTOR" -eq 0 ] || DRY_RUN=1
@@ -329,6 +337,7 @@ push_branch() {
 
 N_REBASED=0; N_CURRENT=0; N_CONFLICT=0; N_DIRTY=0; N_NOBASE=0; N_OTHER=0
 N_TOTAL=0; N_WOULD=0; N_PUSHED=0; N_REFUSED=0; N_WOULDCLASH=0
+N_SYNCED=0; N_DIVERGED=0
 
 while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
     [ -n "${DIR:-}" ] || continue
@@ -353,6 +362,48 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
         COUNT=$(git -C "$DIR" status --porcelain | grep -vc '^??' || true)
         row "⏭️ " "dirty" "$BRANCH" "$COUNT modified"
         N_DIRTY=$((N_DIRTY + 1)); continue
+    fi
+
+    # A branch can be stale against its own remote, not just against its base:
+    # someone rebases it elsewhere and force-pushes, leaving these commits as
+    # patch-identical orphans. Rebasing those onto the base replays work that
+    # already landed, against a base that already contains it, which is a
+    # conflict per file for no reason. Adopting the remote first avoids all of
+    # it -- but only when this branch holds nothing the remote lacks.
+    SYNCNOTE=""
+    if [ "$SYNC" -eq 1 ] \
+       && git rev-parse --verify --quiet "refs/remotes/origin/$BRANCH" >/dev/null \
+       && [ "$(git -C "$DIR" rev-parse HEAD)" != "$(git -C "$DIR" rev-parse "origin/$BRANCH")" ]; then
+        if git -C "$DIR" merge-base --is-ancestor "origin/$BRANCH" HEAD 2>/dev/null; then
+            # Simply ahead: ordinary unpushed work, with the remote where this
+            # branch left it. Nothing was rewritten and there is nothing to adopt.
+            SYNCKIND=""
+        elif git -C "$DIR" merge-base --is-ancestor HEAD "origin/$BRANCH" 2>/dev/null; then
+            SYNCKIND=ff
+        elif ! git -C "$DIR" cherry "origin/$BRANCH" "$BRANCH" | grep '^+' >/dev/null 2>&1; then
+            # Every local commit is upstream by patch, whatever its hash.
+            SYNCKIND=reset
+        else
+            # Real local work under a rewritten remote. Which side wins is a
+            # judgement about intent, so it is reported and left alone.
+            SYNCKIND=""
+            printf '%s\t%s\t%s\n' "$BRANCH" \
+                "has commits origin/$BRANCH does not, and was rewritten underneath them" \
+                "cd $DIR && git log --oneline origin/$BRANCH..$BRANCH" >>"$NEEDS"
+            N_DIVERGED=$((N_DIVERGED + 1))
+        fi
+
+        if [ -n "$SYNCKIND" ] && [ "$DRY_RUN" -eq 1 ]; then
+            SYNCNOTE=", would adopt origin/$BRANCH"
+        elif [ "$SYNCKIND" = ff ]; then
+            git -C "$DIR" merge --ff-only "origin/$BRANCH" >/dev/null 2>&1
+            SYNCNOTE=", fast-forwarded to origin/$BRANCH"
+            N_SYNCED=$((N_SYNCED + 1))
+        elif [ "$SYNCKIND" = reset ]; then
+            git -C "$DIR" reset --hard "origin/$BRANCH" >/dev/null 2>&1
+            SYNCNOTE=", adopted origin/$BRANCH"
+            N_SYNCED=$((N_SYNCED + 1))
+        fi
     fi
 
     if git rev-parse --verify --quiet "refs/remotes/origin/$BASE" >/dev/null; then
@@ -387,14 +438,14 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
             N_WOULDCLASH=$((N_WOULDCLASH + 1))
         else
             [ "$PUSH" -eq 1 ] && THEN=", then push" || THEN=""
-            row "🔄" "would" "$BRANCH" "→ $REF ($WHY)$THEN"
+            row "🔄" "would" "$BRANCH" "→ $REF ($WHY)$SYNCNOTE$THEN"
             N_WOULD=$((N_WOULD + 1))
         fi
         continue
     fi
 
     if git -C "$DIR" -c rerere.enabled=false rebase "$REF" >"$OUT" 2>&1; then
-        DETAIL="→ $REF ($WHY)"
+        DETAIL="→ $REF ($WHY)$SYNCNOTE"
         if grep -q 'is up to date' "$OUT"; then
             ICON="➖"; STATUS=current; MOVED=0
             N_CURRENT=$((N_CURRENT + 1))
@@ -560,6 +611,8 @@ SUMMARY=""
 add_summary() { [ "$1" -gt 0 ] && SUMMARY="$SUMMARY, $1 $2"; return 0; }
 add_summary "$N_WOULD"      "to rebase"
 add_summary "$N_WOULDCLASH" "would clash"
+add_summary "$N_SYNCED"     "synced"
+add_summary "$N_DIVERGED"   "diverged"
 add_summary "$N_REBASED"  "rebased"
 add_summary "$N_PUSHED"   "pushed"
 add_summary "$N_REFUSED"  "push refused"
