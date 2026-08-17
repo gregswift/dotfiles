@@ -63,9 +63,11 @@ Options:
   --prune         Remove worktrees whose branch is gone from origin and was
                   merged. Never touches one with changes, one you are standing
                   in, or one with no sign of having been merged.
-  --doctor        Print what to do about anything that needs you: conflicts,
-                  refused pushes, branches with no base, worktrees held back
-                  from pruning. Combine with -n to diagnose, changing nothing.
+  --doctor        Print what to do about anything that needs you: branches
+                  that would clash, ones with no base, worktrees held back
+                  from pruning. Implies --dry-run and changes nothing, so a
+                  clash is predicted rather than met, and the prediction
+                  merges the two tips where a rebase replays each commit.
   -h, --help      This text.
 
 Both of these can be turned on for good, and off again for one run with
@@ -124,6 +126,9 @@ config_bool() {
 }
 [ -n "$PUSH" ]  || PUSH=$(config_bool refresh.pushWithLease)
 [ -n "$PRUNE" ] || PRUNE=$(config_bool refresh.pruneWorktrees)
+
+# Asking what is wrong is not asking for it to be changed.
+[ "$DOCTOR" -eq 0 ] || DRY_RUN=1
 
 # At the bare root there is no checkout, so there is no single branch the
 # command could mean. Everything else defaults to the branch you are standing in.
@@ -323,7 +328,7 @@ push_branch() {
 }
 
 N_REBASED=0; N_CURRENT=0; N_CONFLICT=0; N_DIRTY=0; N_NOBASE=0; N_OTHER=0
-N_TOTAL=0; N_WOULD=0; N_PUSHED=0; N_REFUSED=0
+N_TOTAL=0; N_WOULD=0; N_PUSHED=0; N_REFUSED=0; N_WOULDCLASH=0
 
 while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
     [ -n "${DIR:-}" ] || continue
@@ -361,9 +366,31 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
     fi
 
     if [ "$DRY_RUN" -eq 1 ]; then
-        [ "$PUSH" -eq 1 ] && THEN=", then push" || THEN=""
-        row "🔄" "would" "$BRANCH" "→ $REF ($WHY)$THEN"
-        N_WOULD=$((N_WOULD + 1)); continue
+        # --doctor changes nothing, so it cannot learn about a conflict by
+        # attempting the rebase. merge-tree does the same three-way merge in
+        # memory and reports what clashes, leaving the worktree alone.
+        #
+        # A merge of the two tips, though, where a rebase replays each commit:
+        # close, and occasionally not the same. Hence "would clash", not "will".
+        if [ "$DOCTOR" -eq 1 ] \
+           && ! git -C "$DIR" merge-tree --write-tree "$BRANCH" "$REF" >"$OUT" 2>&1 \
+           && grep -q '^[0-7]\{6\} [0-9a-f]* [123]	' "$OUT"; then
+            CLASH=$(awk -F'\t' '/^[0-7]{6} [0-9a-f]+ [123]\t/ { print $2 }' "$OUT" | sort -u)
+            NFILES=$(printf '%s' "$CLASH" | grep -c . || true)
+            SAMPLE=$(printf '%s\n' "$CLASH" | grep . | head -3 | tr '\n' ' ')
+            [ "$NFILES" -gt 3 ] && SAMPLE="$SAMPLE(+$((NFILES - 3)) more)"
+            [ "$NFILES" -eq 1 ] && NOUN=file || NOUN=files
+            row "⚠️ " "clash" "$BRANCH" "→ $REF ($NFILES $NOUN)"
+            printf '%s\t%s\t%s\n' "$BRANCH" \
+                "would likely conflict in: $SAMPLE" \
+                "cd $DIR && git rebase $REF" >>"$NEEDS"
+            N_WOULDCLASH=$((N_WOULDCLASH + 1))
+        else
+            [ "$PUSH" -eq 1 ] && THEN=", then push" || THEN=""
+            row "🔄" "would" "$BRANCH" "→ $REF ($WHY)$THEN"
+            N_WOULD=$((N_WOULD + 1))
+        fi
+        continue
     fi
 
     if git -C "$DIR" -c rerere.enabled=false rebase "$REF" >"$OUT" 2>&1; then
@@ -527,7 +554,8 @@ fi
 
 SUMMARY=""
 add_summary() { [ "$1" -gt 0 ] && SUMMARY="$SUMMARY, $1 $2"; return 0; }
-add_summary "$N_WOULD"    "to rebase"
+add_summary "$N_WOULD"      "to rebase"
+add_summary "$N_WOULDCLASH" "would clash"
 add_summary "$N_REBASED"  "rebased"
 add_summary "$N_PUSHED"   "pushed"
 add_summary "$N_REFUSED"  "push refused"
