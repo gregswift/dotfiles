@@ -16,10 +16,10 @@
 [alias]
   lg = log --pretty=format:'%C(yellow)%h%C(reset) %C(cyan)%cI%C(reset) %s %C(blue)%an%C(reset) %C(green)%d%C(reset)' --graph
   commend = commit --amend --no-edit
-  check-trees = "!git-prune-worktrees"
+  check-trees = "!git-refresh --all --prune -n --doctor"
   please = push --force-with-lease
   praise = blame
-  prune-trees = "!git-prune-worktrees --yes"
+  prune-trees = "!git-refresh --all --prune"
   review = log --summary --patch --stat=100 --dirstat --ignore-all-space --reverse --decorate --find-renames=33 --find-copies-harder --cc
   supdate = submodule update --init --rebase
   supgrade = submodule update --init --remote --rebase

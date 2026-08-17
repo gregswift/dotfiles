@@ -33,9 +33,12 @@ ALL=0
 INTERACTIVE=0
 DRY_RUN=0
 VERBOSE=0
-PUSH=0
 DOCTOR=0
 BASE_ARG=""
+# Empty until something sets them, so config can fill in what the command line
+# left alone and an explicit --no-... still wins over config.
+PUSH=""
+PRUNE=""
 
 usage() {
     cat <<EOF
@@ -57,10 +60,19 @@ Options:
   --push-with-lease, --please
                   Push each branch this run rebased, refusing any push that
                   would discard commits you have not seen.
+  --prune         Remove worktrees whose branch is gone from origin and was
+                  merged. Never touches one with changes, one you are standing
+                  in, or one with no sign of having been merged.
   --doctor        Print what to do about anything that needs you: conflicts,
-                  refused pushes, and branches with no base. Combine with -n
-                  to diagnose without changing anything.
+                  refused pushes, branches with no base, worktrees held back
+                  from pruning. Combine with -n to diagnose, changing nothing.
   -h, --help      This text.
+
+Both of these can be turned on for good, and off again for one run with
+--no-please or --no-prune:
+
+  refresh.pushWithLease     bool, same as --please
+  refresh.pruneWorktrees    bool, same as --prune
 
 Exit status is 1 if any rebase conflicted or any push was refused.
 EOF
@@ -75,6 +87,9 @@ while [ $# -gt 0 ]; do
         -n|--dry-run) DRY_RUN=1 ;;
         -v|--verbose) VERBOSE=1 ;;
         --push-with-lease|--please) PUSH=1 ;;
+        --no-push-with-lease|--no-please) PUSH=0 ;;
+        --prune)      PRUNE=1 ;;
+        --no-prune)   PRUNE=0 ;;
         --doctor)     DOCTOR=1 ;;
         -h|--help)    usage; exit 0 ;;
         --)           shift; break ;;
@@ -92,6 +107,23 @@ fi
 
 command -v git >/dev/null 2>&1 || die "git not found in PATH"
 git rev-parse --git-dir >/dev/null 2>&1 || die "not inside a git repository"
+
+# Command line first, then config, then off.
+#
+# git separates the two failures and so must this: exit 1 is "not set", exit 128
+# is a value it could not read as a boolean. Treating those alike would turn a
+# typo into a silently disabled setting, which is the wrong way round for a
+# setting that removes worktrees.
+config_bool() {
+    if _v=$(git config --type=bool --get "$1" 2>/dev/null); then _rc=0; else _rc=$?; fi
+    case "$_rc" in
+        0) [ "$_v" = "true" ] && printf 1 || printf 0 ;;
+        1) printf 0 ;;
+        *) die "$1 in git config is not a boolean: $(git config --get "$1" 2>/dev/null)" ;;
+    esac
+}
+[ -n "$PUSH" ]  || PUSH=$(config_bool refresh.pushWithLease)
+[ -n "$PRUNE" ] || PRUNE=$(config_bool refresh.pruneWorktrees)
 
 # At the bare root there is no checkout, so there is no single branch the
 # command could mean. Everything else defaults to the branch you are standing in.
@@ -355,9 +387,9 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
                 fi
             else
                 ICON="❌"; STATUS=refused
-                printf '%s\t%s\t%s\t%s\n' "$BRANCH" "$DIR" \
+                printf '%s\t%s\t%s\n' "$BRANCH" \
                     "origin/$BRANCH has commits this rebase would discard" \
-                    "git pull --rebase origin $BRANCH" >>"$NEEDS"
+                    "cd $DIR && git pull --rebase origin $BRANCH" >>"$NEEDS"
                 N_REFUSED=$((N_REFUSED + 1))
                 [ "$VERBOSE" -eq 1 ] && cat "$PUSHOUT"
             fi
@@ -381,11 +413,115 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
         # you asked for it, so the conflict is left in place to resolve.
         [ "$ALL" -eq 1 ] && git -C "$DIR" -c rerere.enabled=false rebase --abort >/dev/null 2>&1 || true
         row "❌" "conflict" "$BRANCH" "→ $REF ($NFILES $NOUN)"
-        printf '%s\t%s\t%s\t%s\n' "$BRANCH" "$DIR" "$SAMPLE" "git rebase $REF" >>"$NEEDS"
+        printf '%s\t%s\t%s\n' "$BRANCH" "$SAMPLE" "cd $DIR && git rebase $REF" >>"$NEEDS"
         N_CONFLICT=$((N_CONFLICT + 1))
         [ "$VERBOSE" -eq 1 ] && cat "$OUT"
     fi
 done <"$PLAN"
+
+# ---- clear out what is finished --------------------------------------------
+
+# Sets REASON and returns 0 when the branch looks merged into $DEFAULT.
+REASON=""
+is_merged() {
+    _branch=$1
+    REASON=""
+
+    if [ -n "${REPO:-}" ]; then
+        _pr=$(gh pr list -R "$REPO" --head "$_branch" --state merged \
+                --json number --jq '.[0].number // empty' 2>/dev/null) || _pr=""
+        if [ -n "$_pr" ]; then REASON="merged PR #$_pr"; return 0; fi
+    fi
+
+    if git merge-base --is-ancestor "$_branch" "origin/$DEFAULT" 2>/dev/null; then
+        REASON="already an ancestor of origin/$DEFAULT"
+        return 0
+    fi
+
+    # Squash-merge detection: build a throwaway commit carrying the branch tree
+    # on top of the fork point. If its patch is already upstream, the branch
+    # content landed even though no commit of it did.
+    _base=$(git merge-base "origin/$DEFAULT" "$_branch" 2>/dev/null) || return 1
+    _tree=$(git rev-parse "$_branch^{tree}" 2>/dev/null) || return 1
+    _probe=$(git commit-tree "$_tree" -p "$_base" -m "refresh prune probe" 2>/dev/null) || return 1
+    if git cherry "origin/$DEFAULT" "$_probe" 2>/dev/null | grep -q '^-'; then
+        REASON="tree already in origin/$DEFAULT (squash-merged)"
+        return 0
+    fi
+
+    return 1
+}
+
+N_PRUNED=0; N_UNMERGED=0
+
+if [ "$PRUNE" -eq 1 ]; then
+    # Pruning is repo-wide whatever the refresh touched, so this walks every
+    # worktree rather than the plan.
+    PRUNEWORK="$TMPDIR_RUN/prunework"
+    list_worktrees >"$PRUNEWORK"
+    MAIN_WT=$(git worktree list --porcelain | awk '/^worktree /{print substr($0,10); exit}')
+    CWD=$(pwd -P)
+
+    while IFS="$TAB" read -r BRANCH DIR; do
+        [ -n "${DIR:-}" ] || continue
+        [ "$BRANCH" != "-" ] && [ "$BRANCH" != "$DEFAULT" ] || continue
+        [ "$DIR" != "$MAIN_WT" ] || continue
+        case "$CWD" in "$DIR"|"$DIR"/*) continue ;; esac
+
+        # Still on origin -> the branch is live, nothing to do.
+        ! git rev-parse --verify --quiet "refs/remotes/origin/$BRANCH" >/dev/null || continue
+
+        # branch.<name>.remote survives the remote branch being pruned, so it is
+        # the signal that this branch was pushed at some point. Never pushed
+        # means never merged, so there is nothing here to clean up.
+        [ -n "$(git config --get "branch.$BRANCH.remote" 2>/dev/null || true)" ] || continue
+
+        # The directory may already be gone: git calls such a worktree prunable,
+        # and there is then nothing to be dirty and only admin data to remove.
+        MISSING=0
+        if [ ! -d "$DIR" ]; then
+            MISSING=1
+        elif [ -n "$(git -C "$DIR" status --porcelain)" ]; then
+            printf '⚠️  %s: remote gone but the worktree has uncommitted work\n' "$BRANCH" >&2
+            printf '%s\t%s\t%s\n' "$BRANCH" \
+                "remote branch gone, but this worktree still has changes" \
+                "cd $DIR && git status" >>"$NEEDS"
+            N_UNMERGED=$((N_UNMERGED + 1))
+            continue
+        fi
+
+        if ! is_merged "$BRANCH"; then
+            printf '⚠️  %s: remote gone with no sign it was merged\n' "$BRANCH" >&2
+            printf '%s\t%s\t%s\n' "$BRANCH" \
+                "remote branch gone with no sign it was merged; review before removing" \
+                "git worktree remove $DIR && git branch -D $BRANCH" >>"$NEEDS"
+            N_UNMERGED=$((N_UNMERGED + 1))
+            continue
+        fi
+
+        [ "$MISSING" -eq 1 ] && VERB="stale record for" || VERB="worktree"
+
+        if [ "$DRY_RUN" -eq 1 ]; then
+            printf '🧹 would remove %s %s (%s)\n' "$VERB" "$BRANCH" "$REASON"
+            N_PRUNED=$((N_PRUNED + 1))
+            continue
+        fi
+
+        if [ "$MISSING" -eq 1 ]; then
+            git worktree prune
+        elif ! git worktree remove "$DIR" 2>/dev/null; then
+            printf '⚠️  %s: worktree remove failed, branch left alone\n' "$BRANCH" >&2
+            printf '%s\t%s\t%s\n' "$BRANCH" \
+                "worktree could not be removed" \
+                "git worktree remove --force $DIR" >>"$NEEDS"
+            N_UNMERGED=$((N_UNMERGED + 1))
+            continue
+        fi
+        git branch -D "$BRANCH" >/dev/null 2>&1 || true
+        printf '🧹 removed %s (%s)\n' "$BRANCH" "$REASON"
+        N_PRUNED=$((N_PRUNED + 1))
+    done <"$PRUNEWORK"
+fi
 
 # ---- what happened ---------------------------------------------------------
 
@@ -400,12 +536,16 @@ add_summary "$N_CONFLICT" "conflicted"
 add_summary "$N_DIRTY"    "dirty"
 add_summary "$N_NOBASE"   "no base"
 add_summary "$N_OTHER"    "other"
+[ "$DRY_RUN" -eq 1 ] && add_summary "$N_PRUNED" "to remove" || add_summary "$N_PRUNED" "removed"
+add_summary "$N_UNMERGED" "needing review"
 
 if [ "$ALL" -eq 1 ]; then
     printf '\n%s worktrees: %s\n' "$N_TOTAL" "${SUMMARY#, }"
 fi
 
-ATTENTION=$(( N_CONFLICT + N_REFUSED + N_NOBASE ))
+# Distinct branches, not a sum of counters: one branch can be both held back
+# from pruning and missing a base, and saying "4" for three branches is a lie.
+ATTENTION=$( { cut -f1 "$NEEDS"; cut -f1 "$NOBASE"; } 2>/dev/null | sort -u | grep -c . || true )
 if [ "$ATTENTION" -gt 0 ] && [ "$DOCTOR" -eq 0 ]; then
     printf '\n%s need you; run again with --doctor to see what to do\n' "$ATTENTION"
 fi
@@ -442,11 +582,11 @@ infer_base() {  # $1 = worktree dir, $2 = branch
 if [ "$DOCTOR" -eq 1 ] && [ "$ATTENTION" -gt 0 ]; then
     printf '\n🩺 Needs you (%s):\n' "$ATTENTION"
 
-    while IFS="$TAB" read -r B WTDIR DETAIL REMEDY; do
-        [ -n "${WTDIR:-}" ] || continue
+    while IFS="$TAB" read -r B DETAIL REMEDY; do
+        [ -n "${REMEDY:-}" ] || continue
         printf '\n  %s\n' "$B"
         printf '      %s\n' "$DETAIL"
-        printf '      cd %s && %s\n' "$WTDIR" "$REMEDY"
+        printf '      %s\n' "$REMEDY"
     done <"$NEEDS"
 
     # A branch with no base has usually finished rather than not started: its PR
@@ -461,18 +601,23 @@ if [ "$DOCTOR" -eq 1 ] && [ "$ATTENTION" -gt 0 ]; then
 
     while IFS="$TAB" read -r B WTDIR; do
         [ -n "${WTDIR:-}" ] || continue
+        # Already spoken for above. A branch whose worktree is being held back
+        # from pruning does not also need advice on recording its base.
+        if awk -F"$TAB" -v b="$B" '$1 == b { f = 1 } END { exit !f }' "$NEEDS"; then
+            continue
+        fi
         PRSTATE=$(awk -F"$TAB" -v b="$B" '$1 == b { print $2; exit }' "$ALLPRS")
         PRBASE=$(awk -F"$TAB" -v b="$B" '$1 == b { print $3; exit }' "$ALLPRS")
         printf '\n  %s\n' "$B"
         case "$PRSTATE" in
             MERGED)
                 printf '      its PR merged into %s; the branch is finished\n' "$PRBASE"
-                printf '      git prune-worktrees\n'
+                printf '      git refresh --all --prune\n'
                 ;;
             CLOSED)
                 printf '      its PR was closed without merging\n'
                 printf '      reopen the PR, or drop the worktree:\n'
-                printf '      git prune-worktrees\n'
+                printf '      git refresh --all --prune\n'
                 ;;
             *)
                 GUESS=$(infer_base "$WTDIR" "$B")
