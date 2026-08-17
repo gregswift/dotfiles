@@ -65,8 +65,10 @@ Options:
                   merged. Never touches one with changes, one you are standing
                   in, or one with no sign of having been merged.
   --sync          Adopt origin/<branch> before rebasing, when this branch was
-                  rewritten elsewhere and holds nothing origin lacks. A branch
-                  with commits of its own is reported, never overwritten.
+                  rewritten elsewhere and holds nothing origin lacks. It is
+                  replayed onto the remote rather than reset onto it, so work
+                  is never lost even where that judgement is wrong. A branch
+                  with commits of its own is reported and left alone.
   --doctor        Print what to do about anything that needs you: branches
                   that would clash, ones with no base, worktrees held back
                   from pruning. Implies --dry-run and changes nothing, so a
@@ -405,7 +407,7 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
             SYNCKIND=""
             printf '%s\t%s\t%s\n' "$BRANCH" \
                 "has commits of its own that origin/$BRANCH lacks, and was rewritten underneath them" \
-                "cd $DIR && git cherry -v origin/$BRANCH $BRANCH $REF" >>"$NEEDS"
+                "cd $DIR && git pull --rebase" >>"$NEEDS"
             N_DIVERGED=$((N_DIVERGED + 1))
         fi
 
@@ -416,9 +418,21 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
             SYNCNOTE=", fast-forwarded to origin/$BRANCH"
             N_SYNCED=$((N_SYNCED + 1))
         elif [ "$SYNCKIND" = reset ]; then
-            git -C "$DIR" reset --hard "origin/$BRANCH" >/dev/null 2>&1
-            SYNCNOTE=", adopted origin/$BRANCH"
-            N_SYNCED=$((N_SYNCED + 1))
+            # Rebase onto the remote rather than reset --hard onto it. Where the
+            # guard above is right the result is identical, git dropping every
+            # commit as already applied. Where it is wrong the work is replayed
+            # on top instead of destroyed, and a bare repository keeps no branch
+            # reflog to have recovered it from.
+            if git -C "$DIR" -c rerere.enabled=false rebase "origin/$BRANCH" >"$OUT" 2>&1; then
+                SYNCNOTE=", adopted origin/$BRANCH"
+                N_SYNCED=$((N_SYNCED + 1))
+            else
+                git -C "$DIR" -c rerere.enabled=false rebase --abort >/dev/null 2>&1 || true
+                printf '%s\t%s\t%s\n' "$BRANCH" \
+                    "could not be replayed onto origin/$BRANCH" \
+                    "cd $DIR && git pull --rebase" >>"$NEEDS"
+                N_DIVERGED=$((N_DIVERGED + 1))
+            fi
         fi
     fi
 
