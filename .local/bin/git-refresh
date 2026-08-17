@@ -30,6 +30,7 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX
 
 PROG=$(basename "$0")
 ALL=0
+STACK=0
 INTERACTIVE=0
 DRY_RUN=0
 VERBOSE=0
@@ -54,6 +55,9 @@ request, falling back to the base recorded when the branch was created.
 
 Options:
   --all           Every worktree, in stack order. Assumed at the bare root.
+  --stack         Only the branches stacked with this one, reached through PR
+                  bases in both directions, bottom-up. The branches above are
+                  the ones a rebase here would strand.
   -i, --interactive
                   Follow the rebase with an interactive pass. One branch only.
   -n, --dry-run   Show what would happen; rebase nothing.
@@ -92,6 +96,7 @@ die() { printf '❌ %s\n' "$*" >&2; exit 1; }
 while [ $# -gt 0 ]; do
     case "$1" in
         --all)        ALL=1 ;;
+        --stack)      STACK=1 ;;
         -i|--interactive) INTERACTIVE=1 ;;
         -n|--dry-run) DRY_RUN=1 ;;
         -v|--verbose) VERBOSE=1 ;;
@@ -140,6 +145,21 @@ config_bool() {
 # Asking what is wrong is not asking for it to be changed.
 [ "$DOCTOR" -eq 0 ] || DRY_RUN=1
 
+# A stack is anchored on the branch you are standing in, and from there it is
+# every worktree reachable through PR bases, upwards as well as down. The
+# branches above are the ones a rebase here strands, so they are the ones most
+# in need of coming along.
+if [ "$STACK" -eq 1 ]; then
+    [ "$ALL" -eq 0 ] || die "--stack and --all name different sets; pick one"
+    [ "$(git rev-parse --is-inside-work-tree 2>/dev/null || echo false)" = "true" ] \
+        || die "--stack starts from a branch; stand in a worktree, or use --all"
+    STACK_ROOT=$(git branch --show-current)
+    [ -n "$STACK_ROOT" ] || die "detached HEAD; --stack needs a branch to start from"
+    # Every branch-at-a-time behaviour below keys off ALL: skip a dirty worktree
+    # rather than refuse, throw a conflicted rebase away, order by base.
+    ALL=1
+fi
+
 # At the bare root there is no checkout, so there is no single branch the
 # command could mean. Everything else defaults to the branch you are standing in.
 if [ "$ALL" -eq 0 ] && [ "$(git rev-parse --is-inside-work-tree 2>/dev/null || echo false)" != "true" ]; then
@@ -147,8 +167,10 @@ if [ "$ALL" -eq 0 ] && [ "$(git rev-parse --is-inside-work-tree 2>/dev/null || e
 fi
 
 if [ "$ALL" -eq 1 ]; then
-    [ "$INTERACTIVE" -eq 0 ] || die "-i rebases one branch; drop --all"
-    [ -z "$BASE_ARG" ]       || die "a base names one branch's target; drop --all"
+    # --stack works by turning ALL on, so name the flag the caller actually typed.
+    [ "$STACK" -eq 1 ] && MODE=--stack || MODE=--all
+    [ "$INTERACTIVE" -eq 0 ] || die "-i rebases one branch; drop $MODE"
+    [ -z "$BASE_ARG" ]       || die "a base names one branch's target; drop $MODE"
 fi
 
 TMPDIR_RUN=$(mktemp -d) || die "cannot create temp dir"
@@ -293,6 +315,34 @@ while IFS="$TAB" read -r BRANCH DIR; do
         printf '%s\t%s\t%s\n' "$BRANCH" "$DIR" "$RB" >>"$PLAN"
     fi
 done <"$WORK"
+
+# Keep only what is connected to the branch we started on, following bases both
+# ways. The default branch is never added, which is what stops the walk: without
+# that, one branch based on main would drag in every other branch based on main.
+if [ "$STACK" -eq 1 ]; then
+    awk -F"$TAB" -v cur="$STACK_ROOT" -v def="$DEFAULT" '
+        { b[NR] = $1; base[NR] = $3; line[NR] = $0; n = NR }
+        END {
+            keep[cur] = 1
+            moved = 1
+            while (moved) {
+                moved = 0
+                for (i = 1; i <= n; i++) {
+                    if (b[i] == def) continue
+                    if (keep[b[i]] && base[i] != def && base[i] != "-" && base[i] != "" && !keep[base[i]]) {
+                        keep[base[i]] = 1; moved = 1
+                    }
+                    if (keep[base[i]] && !keep[b[i]]) { keep[b[i]] = 1; moved = 1 }
+                }
+            }
+            for (i = 1; i <= n; i++) if (keep[b[i]] && b[i] != def) print line[i]
+        }
+    ' "$PLAN" >"$PLAN.stack" && mv "$PLAN.stack" "$PLAN"
+
+    # Branches outside the stack have no claim on the doctor's attention.
+    awk -F"$TAB" 'NR == FNR { keep[$1] = 1; next } keep[$1]' "$PLAN" "$NOBASE" >"$NOBASE.stack" \
+        && mv "$NOBASE.stack" "$NOBASE"
+fi
 
 # A stack only restacks correctly from the bottom up: with --please, pushing the
 # branch below moves the origin ref the next one rebases onto. Order by base,
@@ -644,7 +694,9 @@ add_summary "$N_OTHER"    "other"
 [ "$DRY_RUN" -eq 1 ] && add_summary "$N_PRUNED" "to remove" || add_summary "$N_PRUNED" "removed"
 add_summary "$N_UNMERGED" "needing review"
 
-if [ "$ALL" -eq 1 ]; then
+if [ "$STACK" -eq 1 ]; then
+    printf '\n%s in the %s stack: %s\n' "$N_TOTAL" "$STACK_ROOT" "${SUMMARY#, }"
+elif [ "$ALL" -eq 1 ]; then
     printf '\n%s worktrees: %s\n' "$N_TOTAL" "${SUMMARY#, }"
 fi
 
