@@ -394,6 +394,7 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
     fi
 
     if git -C "$DIR" -c rerere.enabled=false rebase "$REF" >"$OUT" 2>&1; then
+        DETAIL="→ $REF ($WHY)"
         if grep -q 'is up to date' "$OUT"; then
             ICON="➖"; STATUS=current; MOVED=0
             N_CURRENT=$((N_CURRENT + 1))
@@ -411,9 +412,12 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
                 if ! grep -q 'Everything up-to-date' "$PUSHOUT"; then
                     ICON="✅"; STATUS=pushed
                     N_PUSHED=$((N_PUSHED + 1))
+                    # Nothing was rebased, so there is no base to point at:
+                    # "→ base" would read as though the branch moved onto it.
+                    [ "$MOVED" -eq 1 ] || DETAIL="origin/$BRANCH updated, already on $REF"
                 fi
             else
-                ICON="❌"; STATUS=refused
+                ICON="❌"; STATUS=refused; DETAIL="→ $REF (push refused)"
                 printf '%s\t%s\t%s\n' "$BRANCH" \
                     "origin/$BRANCH has commits this rebase would discard" \
                     "cd $DIR && git pull --rebase origin $BRANCH" >>"$NEEDS"
@@ -422,7 +426,7 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
             fi
         fi
 
-        row "$ICON" "$STATUS" "$BRANCH" "→ $REF ($WHY)"
+        row "$ICON" "$STATUS" "$BRANCH" "$DETAIL"
         [ "$VERBOSE" -eq 1 ] && cat "$OUT"
 
         if [ "$INTERACTIVE" -eq 1 ]; then
