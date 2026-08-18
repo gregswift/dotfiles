@@ -73,10 +73,10 @@ Options:
                   replayed onto the remote rather than reset onto it, so work
                   is never lost even where that judgement is wrong. A branch
                   with commits of its own is reported and left alone.
-  --doctor        Print what to do about anything that needs you: branches
-                  that would clash, ones with no base, worktrees held back
-                  from pruning. Implies --dry-run and changes nothing, so a
-                  clash is predicted rather than met, and the prediction
+  --doctor        Recommend what to do about everything the run reported:
+                  conflicts, branches with no base, worktrees held back from
+                  pruning. Implies --dry-run and changes nothing, so a
+                  conflict is predicted rather than met, and the prediction
                   merges the two tips where a rebase replays each commit.
   -h, --help      This text.
 
@@ -215,6 +215,14 @@ list_worktrees() {
 # not acting on belongs to --doctor and not here.
 BRANCH_W=24
 BASE_W=16
+# A branch can be more than one thing at once; the row has one column to say so.
+note() {  # $1 = what happened, possibly empty
+    if [ -z "$DIVNOTE" ]; then printf '%s' "$1"
+    elif [ -z "$1" ]; then printf '⚠️  %s' "$DIVNOTE"
+    else printf '%s, %s' "$1" "$DIVNOTE"
+    fi
+}
+
 row() {
     if [ -n "$3" ]; then
         printf '%-*s  %-*s  %s\n' "$BRANCH_W" "$1" "$BASE_W" "$2" "$3"
@@ -519,7 +527,7 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
     # already landed, against a base that already contains it, which is a
     # conflict per file for no reason. Adopting the remote first avoids all of
     # it -- but only when this branch holds nothing the remote lacks.
-    SYNCNOTE=""
+    SYNCNOTE=""; DIVNOTE=""
     if [ "$SYNC" -eq 1 ] \
        && git rev-parse --verify --quiet "refs/remotes/origin/$BRANCH" >/dev/null \
        && [ "$(git -C "$DIR" rev-parse HEAD)" != "$(git -C "$DIR" rev-parse "origin/$BRANCH")" ]; then
@@ -542,6 +550,9 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
             # Real local work under a rewritten remote. Which side wins is a
             # judgement about intent, so it is reported and left alone.
             SYNCKIND=""
+            # Stated here, so the run names the problem; --doctor is where the
+            # decision about it gets recommended.
+            DIVNOTE="diverged from origin"
             printf '%s\t%s\t%s\n' "$BRANCH" \
                 "has commits of its own that origin/$BRANCH lacks, and was rewritten underneath them" \
                 "cd $DIR && git pull --rebase" >>"$NEEDS"
@@ -576,26 +587,28 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
     if [ "$DRY_RUN" -eq 1 ]; then
         # --doctor changes nothing, so it cannot learn about a conflict by
         # attempting the rebase. merge-tree does the same three-way merge in
-        # memory and reports what clashes, leaving the worktree alone.
+        # memory and reports what conflicts, leaving the worktree alone.
         #
         # A merge of the two tips, though, where a rebase replays each commit:
-        # close, and occasionally not the same. Hence "would clash", not "will".
-        if [ "$DOCTOR" -eq 1 ] \
-           && ! git -C "$DIR" merge-tree --write-tree "$BRANCH" "$REF" >"$OUT" 2>&1 \
+        # close, and occasionally not the same, so this predicts rather than promises.
+        # Predicted for any dry run, not just --doctor. Which branches will not
+        # replay cleanly is the one thing a dry run knows that the branch list
+        # does not, so withholding it leaves nothing behind but the names.
+        if ! git -C "$DIR" merge-tree --write-tree "$BRANCH" "$REF" >"$OUT" 2>&1 \
            && grep -q '^[0-7]\{6\} [0-9a-f]* [123]	' "$OUT"; then
             CLASH=$(awk -F'\t' '/^[0-7]{6} [0-9a-f]+ [123]\t/ { print $2 }' "$OUT" | sort -u)
             NFILES=$(printf '%s' "$CLASH" | grep -c . || true)
             SAMPLE=$(printf '%s\n' "$CLASH" | grep . | head -3 | tr '\n' ' ')
             [ "$NFILES" -gt 3 ] && SAMPLE="$SAMPLE(+$((NFILES - 3)) more)"
             [ "$NFILES" -eq 1 ] && NOUN=file || NOUN=files
-            row "$BRANCH" "$BASEDISP" "⚠️  conflict, $NFILES $NOUN"
+            row "$BRANCH" "$BASEDISP" "$(note "⚠️  conflict, $NFILES $NOUN")"
             printf '%s\t%s\t%s\n' "$BRANCH" \
                 "would likely conflict in: $SAMPLE" \
                 "cd $DIR && git rebase $REF" >>"$NEEDS"
             N_WOULDCLASH=$((N_WOULDCLASH + 1))
         else
             [ "$PUSH" -eq 1 ] && THEN=", then push" || THEN=""
-            row "$BRANCH" "$BASEDISP" ""
+            row "$BRANCH" "$BASEDISP" "$(note "")"
             N_WOULD=$((N_WOULD + 1))
         fi
         continue
@@ -633,7 +646,7 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
             fi
         fi
 
-        row "$BRANCH" "$BASEDISP" "$NOTE"
+        row "$BRANCH" "$BASEDISP" "$(note "$NOTE")"
         [ "$VERBOSE" -eq 1 ] && cat "$OUT"
 
         if [ "$INTERACTIVE" -eq 1 ]; then
@@ -650,7 +663,7 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
         # In --all the attempt is speculative and gets thrown away. On one branch
         # you asked for it, so the conflict is left in place to resolve.
         [ "$ALL" -eq 1 ] && git -C "$DIR" -c rerere.enabled=false rebase --abort >/dev/null 2>&1 || true
-        row "$BRANCH" "$BASEDISP" "❌ conflict, $NFILES $NOUN"
+        row "$BRANCH" "$BASEDISP" "$(note "❌ conflict, $NFILES $NOUN")"
         printf '%s\t%s\t%s\n' "$BRANCH" "$SAMPLE" "cd $DIR && git rebase $REF" >>"$NEEDS"
         N_CONFLICT=$((N_CONFLICT + 1))
         [ "$VERBOSE" -eq 1 ] && cat "$OUT"
@@ -766,7 +779,7 @@ fi
 SUMMARY=""
 add_summary() { [ "$1" -gt 0 ] && SUMMARY="$SUMMARY, $1 $2"; return 0; }
 add_summary "$N_WOULD"      "to rebase"
-add_summary "$N_WOULDCLASH" "would clash"
+add_summary "$N_WOULDCLASH" "would conflict"
 add_summary "$N_SYNCED"     "synced"
 add_summary "$N_DIVERGED"   "diverged"
 add_summary "$N_REBASED"  "rebased"
