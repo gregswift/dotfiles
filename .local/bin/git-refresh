@@ -216,7 +216,11 @@ list_worktrees() {
 BRANCH_W=24
 BASE_W=16
 row() {
-    printf '%s %-*s  %-*s  %s\n' "$1" "$BRANCH_W" "$2" "$BASE_W" "$3" "$4"
+    if [ -n "$3" ]; then
+        printf '%-*s  %-*s  %s\n' "$BRANCH_W" "$1" "$BASE_W" "$2" "$3"
+    else
+        printf '%-*s  %s\n' "$BRANCH_W" "$1" "$2"
+    fi
 }
 
 # ---- what to work on -------------------------------------------------------
@@ -246,7 +250,6 @@ fi
 
 # ---- refresh the remotes ---------------------------------------------------
 
-printf '📥 Fetching...\n'
 if [ "$DRY_RUN" -eq 1 ]; then
     git fetch --all --prune --dry-run
 else
@@ -374,9 +377,6 @@ while IFS="$TAB" read -r BRANCH DIR; do
         printf '%s\t%s\t-\t%s\n' "$BRANCH" "$DIR" "no base" >>"$PLAN"
     else
         printf '%s\t%s\t%s\n' "$BRANCH" "$DIR" "$RB" >>"$PLAN"
-        # Assumed rather than known. Act on it, but keep the nudge to record
-        # the real one, which is the only thing that makes it known.
-        case "$RB" in *"${TAB}assumed") printf '%s\t%s\n' "$BRANCH" "$DIR" >>"$NOBASE" ;; esac
     fi
 done <"$WORK"
 
@@ -454,6 +454,8 @@ push_branch() {
 BRANCH_W=$(cut -f1 "$PLAN" | awk '{ if (length > m) m = length } END { print (m > 10 ? m : 10) }')
 BASE_W=$(cut -f3 "$PLAN" | awk '{ if (length > m) m = length } END { print (m > 6 ? m : 6) }')
 
+[ "$ALL" -eq 0 ] || row "BRANCH" "BASE" "STATUS"
+
 N_REBASED=0; N_CURRENT=0; N_CONFLICT=0; N_DIRTY=0; N_NOBASE=0; N_OTHER=0
 N_TOTAL=0; N_WOULD=0; N_PUSHED=0; N_REFUSED=0; N_WOULDCLASH=0
 N_SYNCED=0; N_DIVERGED=0
@@ -463,7 +465,7 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
     N_TOTAL=$((N_TOTAL + 1))
 
     if [ "$BRANCH" = "-" ]; then
-        row "⏭️ " "$(basename "$DIR")" "-" "detached"
+        row "$(basename "$DIR")" "-" "⏭️  detached"
         N_OTHER=$((N_OTHER + 1)); continue
     fi
     if [ ! -d "$DIR" ]; then
@@ -472,7 +474,7 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
         # plain git's business, not this run's.
         if [ "$PRUNE" -eq 1 ] \
            && ! git rev-parse --verify --quiet "refs/remotes/origin/$BRANCH" >/dev/null; then
-            row "⏭️ " "$BRANCH" "-" "gone"
+            row "$BRANCH" "-" "⏭️  gone"
         else
             row "⏭️ " "$BRANCH" "-" "gone"
             printf '%s\t%s\t%s\n' "$BRANCH" \
@@ -482,7 +484,7 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
         N_OTHER=$((N_OTHER + 1)); continue
     fi
     if [ "$BASE" = "-" ]; then
-        row "⏭️ " "$BRANCH" "-" "no base"
+        row "$BRANCH" "-" "⏭️  no base"
         N_NOBASE=$((N_NOBASE + 1)); continue
     fi
 
@@ -490,7 +492,7 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
     if ! git -C "$DIR" diff --quiet || ! git -C "$DIR" diff --cached --quiet; then
         [ "$ALL" -eq 1 ] || die "you have uncommitted changes; commit or stash them first"
         COUNT=$(git -C "$DIR" status --porcelain | grep -vc '^??' || true)
-        row "⏭️ " "$BRANCH" "$BASE" "dirty"
+        row "$BRANCH" "$BASE" "⏭️  dirty"
         printf '%s\t%s\t%s\n' "$BRANCH" \
             "$COUNT uncommitted change(s), so it was left alone" \
             "cd $DIR && git status" >>"$NEEDS"
@@ -502,7 +504,7 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
     elif git rev-parse --verify --quiet "$BASE" >/dev/null; then
         REF=$BASE
     else
-        row "⏭️ " "$BRANCH" "$BASE" "no base"
+        row "$BRANCH" "$BASE" "⏭️  no base"
         printf '%s\t%s\n' "$BRANCH" "$DIR" >>"$NOBASE"
         N_NOBASE=$((N_NOBASE + 1)); continue
     fi
@@ -586,27 +588,26 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
             SAMPLE=$(printf '%s\n' "$CLASH" | grep . | head -3 | tr '\n' ' ')
             [ "$NFILES" -gt 3 ] && SAMPLE="$SAMPLE(+$((NFILES - 3)) more)"
             [ "$NFILES" -eq 1 ] && NOUN=file || NOUN=files
-            row "⚠️ " "$BRANCH" "$BASEDISP" "clash"
+            row "$BRANCH" "$BASEDISP" "⚠️  conflict, $NFILES $NOUN"
             printf '%s\t%s\t%s\n' "$BRANCH" \
                 "would likely conflict in: $SAMPLE" \
                 "cd $DIR && git rebase $REF" >>"$NEEDS"
             N_WOULDCLASH=$((N_WOULDCLASH + 1))
         else
             [ "$PUSH" -eq 1 ] && THEN=", then push" || THEN=""
-            row "🔄" "$BRANCH" "$BASEDISP" "rebase"
+            row "$BRANCH" "$BASEDISP" ""
             N_WOULD=$((N_WOULD + 1))
         fi
         continue
     fi
 
     if git -C "$DIR" -c rerere.enabled=false rebase "$REF" >"$OUT" 2>&1; then
-        DETAIL="→ $REF ($WHY)$SYNCNOTE"
         if grep -q 'is up to date' "$OUT"; then
-            ICON="➖"; STATUS=current; MOVED=0
-            [ -z "$SYNCNOTE" ] || { ICON="✅"; STATUS=synced; }
+            NOTE="➖ current"; MOVED=0
+            [ -z "$SYNCNOTE" ] || NOTE="✅ synced"
             N_CURRENT=$((N_CURRENT + 1))
         else
-            ICON="✅"; STATUS=rebase; MOVED=1
+            NOTE=""; MOVED=1
             N_REBASED=$((N_REBASED + 1))
         fi
 
@@ -617,14 +618,13 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
             if push_branch "$DIR" "$BRANCH" >"$PUSHOUT" 2>&1; then
                 # Origin already had it: nothing was published, so say nothing.
                 if ! grep -q 'Everything up-to-date' "$PUSHOUT"; then
-                    ICON="✅"; STATUS=pushed
+                    # Say which happened: a push behind a rebase is a restack,
+                    # a push on its own only published what was already here.
+                    [ "$MOVED" -eq 1 ] && NOTE="✅ pushed" || NOTE="✅ pushed, no rebase needed"
                     N_PUSHED=$((N_PUSHED + 1))
-                    # Nothing was rebased, so there is no base to point at:
-                    # "→ base" would read as though the branch moved onto it.
-                    [ "$MOVED" -eq 1 ] || DETAIL="origin/$BRANCH updated, already on $REF"
                 fi
             else
-                ICON="❌"; STATUS=refused; DETAIL="→ $REF (push refused)"
+                NOTE="❌ push refused"
                 printf '%s\t%s\t%s\n' "$BRANCH" \
                     "origin/$BRANCH has commits this rebase would discard" \
                     "cd $DIR && git pull --rebase origin $BRANCH" >>"$NEEDS"
@@ -633,7 +633,7 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
             fi
         fi
 
-        row "$ICON" "$BRANCH" "$BASEDISP" "$STATUS"
+        row "$BRANCH" "$BASEDISP" "$NOTE"
         [ "$VERBOSE" -eq 1 ] && cat "$OUT"
 
         if [ "$INTERACTIVE" -eq 1 ]; then
@@ -650,7 +650,7 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
         # In --all the attempt is speculative and gets thrown away. On one branch
         # you asked for it, so the conflict is left in place to resolve.
         [ "$ALL" -eq 1 ] && git -C "$DIR" -c rerere.enabled=false rebase --abort >/dev/null 2>&1 || true
-        row "❌" "$BRANCH" "$BASEDISP" "clash"
+        row "$BRANCH" "$BASEDISP" "❌ conflict, $NFILES $NOUN"
         printf '%s\t%s\t%s\n' "$BRANCH" "$SAMPLE" "cd $DIR && git rebase $REF" >>"$NEEDS"
         N_CONFLICT=$((N_CONFLICT + 1))
         [ "$VERBOSE" -eq 1 ] && cat "$OUT"
