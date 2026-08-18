@@ -157,6 +157,15 @@ config_bool() {
 # Asking what is wrong is not asking for it to be changed.
 [ "$DOCTOR" -eq 0 ] || DRY_RUN=1
 
+# Advice this specific does not scale to twenty branches, and the table is
+# already the triage across them. Diagnosis is for the one you are standing in.
+if [ "$DOCTOR" -eq 1 ]; then
+    [ "$ALL" -eq 0 ] && [ "$STACK" -eq 0 ] \
+        || die "--doctor diagnoses one branch; drop --all and --stack"
+    [ "$(git rev-parse --is-inside-work-tree 2>/dev/null || echo false)" = "true" ] \
+        || die "--doctor diagnoses one branch; stand in a worktree"
+fi
+
 # A stack is anchored on the branch you are standing in, and from there it is
 # every worktree reachable through PR bases, upwards as well as down. The
 # branches above are the ones a rebase here strands, so they are the ones most
@@ -238,6 +247,21 @@ unpushed_note() {  # $1 = worktree, $2 = branch, $3 = base ref
     fi
     _n=$(git -C "$1" cherry "origin/$2" "$2" "$3" 2>/dev/null | grep -c '^+' || true)
     [ "$_n" -eq 0 ] || printf '%s unpushed' "$_n"
+}
+
+# Work origin has not got is a problem the run reported, so it gets an entry
+# like every other one. Both paths call this: a dry run is where --doctor reads.
+report_unpushed() {
+    case "$UNPUSHED" in
+        "") ;;
+        "not on origin")
+            printf '%s\t%s\t%s\n' "$BRANCH" \
+                "this branch has never been pushed; it exists only here" \
+                "git push -u origin $BRANCH" >>"$NEEDS" ;;
+        *)  printf '%s\t%s\t%s\n' "$BRANCH" \
+                "$UNPUSHED: commits here that origin has not got" \
+                "git push   (or: git refresh --please)" >>"$NEEDS" ;;
+    esac
 }
 
 # A branch can be more than one thing at once; the row has one column to say so.
@@ -480,6 +504,19 @@ fi
 
 # ---- do the work -----------------------------------------------------------
 
+# In --all the rebases are speculative and thrown away, so they have no business
+# teaching rerere anything. On the branch you are standing in, the rebase is the
+# one you stay and resolve, which is the case rerere exists for: it records what
+# you worked out and replays it when the same conflict comes round again.
+git_rebase() {  # $1 = worktree dir, remaining args go to git rebase
+    _d=$1; shift
+    if [ "$ALL" -eq 1 ]; then
+        git -C "$_d" -c rerere.enabled=false rebase "$@"
+    else
+        git -C "$_d" rebase "$@"
+    fi
+}
+
 push_branch() {
     _lease=$(awk -F"$TAB" -v b="$2" '$1 == b { print $2; exit }' "$LEASES")
     if [ -n "$_lease" ]; then
@@ -608,11 +645,11 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
             # commit as already applied. Where it is wrong the work is replayed
             # on top instead of destroyed, and a bare repository keeps no branch
             # reflog to have recovered it from.
-            if git -C "$DIR" -c rerere.enabled=false rebase "origin/$BRANCH" >"$OUT" 2>&1; then
+            if git_rebase "$DIR" "origin/$BRANCH" >"$OUT" 2>&1; then
                 SYNCNOTE=", adopted origin/$BRANCH"
                 N_SYNCED=$((N_SYNCED + 1))
             else
-                git -C "$DIR" -c rerere.enabled=false rebase --abort >/dev/null 2>&1 || true
+                git_rebase "$DIR" --abort >/dev/null 2>&1 || true
                 printf '%s\t%s\t%s\n' "$BRANCH" \
                     "could not be replayed onto origin/$BRANCH" \
                     "cd $DIR && git pull --rebase" >>"$NEEDS"
@@ -635,23 +672,24 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
            && grep -q '^[0-7]\{6\} [0-9a-f]* [123]	' "$OUT"; then
             CLASH=$(awk -F'\t' '/^[0-7]{6} [0-9a-f]+ [123]\t/ { print $2 }' "$OUT" | sort -u)
             NFILES=$(printf '%s' "$CLASH" | grep -c . || true)
-            SAMPLE=$(printf '%s\n' "$CLASH" | grep . | head -3 | tr '\n' ' ')
-            [ "$NFILES" -gt 3 ] && SAMPLE="$SAMPLE(+$((NFILES - 3)) more)"
+            SAMPLE=$(printf '%s\n' "$CLASH" | grep . | tr '\n' ' ')
             [ "$NFILES" -eq 1 ] && NOUN=file || NOUN=files
             row "$BRANCH" "$BASEDISP" "$(note "⚠️  conflict, $NFILES $NOUN")"
-            printf '%s\t%s\t%s\n' "$BRANCH" \
-                "would likely conflict in: $SAMPLE" \
-                "cd $DIR && git rebase $REF" >>"$NEEDS"
+            printf '%s\t%s\t%s\t%s\n' "$BRANCH" \
+                "would conflict in $NFILES $NOUN against $REF" \
+                "git rebase $REF   to do it now and resolve them" \
+                "$SAMPLE" >>"$NEEDS"
             N_WOULDCLASH=$((N_WOULDCLASH + 1))
         else
             [ "$PUSH" -eq 1 ] && THEN=", then push" || THEN=""
             row "$BRANCH" "$BASEDISP" "$(note "")"
             N_WOULD=$((N_WOULD + 1))
         fi
+        report_unpushed
         continue
     fi
 
-    if git -C "$DIR" -c rerere.enabled=false rebase "$REF" >"$OUT" 2>&1; then
+    if git_rebase "$DIR" "$REF" >"$OUT" 2>&1; then
         if grep -q 'is up to date' "$OUT"; then
             NOTE="➖ current"; MOVED=0
             [ -z "$SYNCNOTE" ] || NOTE="✅ synced"
@@ -692,6 +730,7 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
         fi
 
         UNPUSHED=$(unpushed_note "$DIR" "$BRANCH" "$REF")
+        report_unpushed
         row "$BRANCH" "$BASEDISP" "$(note "$NOTE")"
         [ "$VERBOSE" -eq 1 ] && cat "$OUT"
 
@@ -703,15 +742,14 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
     else
         UNMERGED=$(git -C "$DIR" diff --name-only --diff-filter=U 2>/dev/null || true)
         NFILES=$(printf '%s' "$UNMERGED" | grep -c . || true)
-        SAMPLE=$(printf '%s\n' "$UNMERGED" | grep . | head -3 | tr '\n' ' ')
-        [ "$NFILES" -gt 3 ] && SAMPLE="$SAMPLE(+$((NFILES - 3)) more)"
+        SAMPLE=$(printf '%s\n' "$UNMERGED" | grep . | tr '\n' ' ')
         [ "$NFILES" -eq 1 ] && NOUN=file || NOUN=files
         # In --all the attempt is speculative and gets thrown away. On one branch
         # you asked for it, so the conflict is left in place to resolve.
         if [ "$ALL" -eq 1 ]; then
             # Twenty speculative attempts cannot leave six worktrees wedged, so
             # this one is thrown away and offered back as a command to run.
-            git -C "$DIR" -c rerere.enabled=false rebase --abort >/dev/null 2>&1 || true
+            git_rebase "$DIR" --abort >/dev/null 2>&1 || true
             row "$BRANCH" "$BASEDISP" "$(note "❌ conflict, $NFILES $NOUN")"
             printf '%s\t%s\t%s\n' "$BRANCH" "$SAMPLE" \
                 "cd $DIR && git rebase $REF" >>"$NEEDS"
@@ -719,9 +757,20 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
             # Standing in the branch and asking for it is asking to deal with
             # what comes back. Aborting here only means running the identical
             # rebase again by hand to reach the same conflict.
-            row "$BRANCH" "$BASEDISP" "$(note "❌ conflict, $NFILES $NOUN, rebase in progress")"
-            printf '%s\t%s\t%s\n' "$BRANCH" "$SAMPLE" \
-                "resolve, then: git rebase --continue   (or: git rebase --abort)" >>"$NEEDS"
+            if [ "$NFILES" -eq 0 ]; then
+                # Every conflict matched something rerere had seen before. The
+                # rebase is still paused, but there is nothing left to work out.
+                row "$BRANCH" "$BASEDISP" "$(note "⚠️  conflict resolved by rerere, rebase paused")"
+                printf '%s\t%s\t%s\n' "$BRANCH" \
+                    "rerere had seen every one of these conflicts and resolved them" \
+                    "check the result, then: git rebase --continue" >>"$NEEDS"
+            else
+                row "$BRANCH" "$BASEDISP" "$(note "❌ conflict, $NFILES $NOUN, rebase in progress")"
+                printf '%s\t%s\t%s\t%s\n' "$BRANCH" \
+                    "$NFILES $NOUN conflict, and the rebase is waiting on them" \
+                    "resolve, then: git rebase --continue   (or: git rebase --abort)" \
+                    "$SAMPLE" >>"$NEEDS"
+            fi
         fi
         N_CONFLICT=$((N_CONFLICT + 1))
         [ "$VERBOSE" -eq 1 ] && cat "$OUT"
@@ -876,13 +925,13 @@ fi
 
 
 if [ "$DOCTOR" -eq 1 ] && [ "$ATTENTION" -gt 0 ]; then
-    printf '\n🩺 Needs you (%s):\n' "$ATTENTION"
+    printf '\n🩺 %s\n' "$(cut -f1 "$NEEDS" | head -1)"
 
-    while IFS="$TAB" read -r B DETAIL REMEDY; do
+    while IFS="$TAB" read -r B DETAIL REMEDY FILES; do
         [ -n "${REMEDY:-}" ] || continue
-        printf '\n  %s\n' "$B"
-        printf '      %s\n' "$DETAIL"
-        printf '      %s\n' "$REMEDY"
+        printf '\n  %s\n' "$DETAIL"
+        for _f in ${FILES:-}; do printf '      %s\n' "$_f"; done
+        printf '  → %s\n' "$REMEDY"
     done <"$NEEDS"
 
     # A branch with no base has usually finished rather than not started: its PR
