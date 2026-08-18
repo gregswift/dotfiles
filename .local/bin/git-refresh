@@ -215,12 +215,27 @@ list_worktrees() {
 # not acting on belongs to --doctor and not here.
 BRANCH_W=24
 BASE_W=16
+# Work of this branch's own that origin does not have. Counted by patch and
+# bounded by the base, because a branch rebased locally carries the base's
+# commits in origin/<branch>..HEAD: 410 of them on one worktree here, of which
+# five were actually its own. A rebase rewrites shas without creating work, so
+# by this measure a freshly rebased branch is correctly nothing to push.
+unpushed_note() {  # $1 = worktree, $2 = branch, $3 = base ref
+    if ! git rev-parse --verify --quiet "refs/remotes/origin/$2" >/dev/null; then
+        printf 'not on origin'; return
+    fi
+    _n=$(git -C "$1" cherry "origin/$2" "$2" "$3" 2>/dev/null | grep -c '^+' || true)
+    [ "$_n" -eq 0 ] || printf '%s unpushed' "$_n"
+}
+
 # A branch can be more than one thing at once; the row has one column to say so.
 note() {  # $1 = what happened, possibly empty
-    if [ -z "$DIVNOTE" ]; then printf '%s' "$1"
-    elif [ -z "$1" ]; then printf '⚠️  %s' "$DIVNOTE"
-    else printf '%s, %s' "$1" "$DIVNOTE"
-    fi
+    _parts=$1
+    for _extra in "$DIVNOTE" "$UNPUSHED"; do
+        [ -n "$_extra" ] || continue
+        [ -z "$_parts" ] && _parts="⚠️  $_extra" || _parts="$_parts, $_extra"
+    done
+    printf '%s' "$_parts"
 }
 
 row() {
@@ -526,6 +541,7 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
     # default branch is no exception: it is updated from origin/<default> like
     # everything else, so it gets the ref rather than a dash.
     BASEDISP=$REF
+    UNPUSHED=$(unpushed_note "$DIR" "$BRANCH" "$REF")
 
     # A branch can be stale against its own remote, not just against its base:
     # someone rebases it elsewhere and force-pushes, leaving these commits as
@@ -636,7 +652,12 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
         # In --all only what moved is worth pushing; a run over every worktree
         # should not fire off pushes for branches it did not touch. On one
         # branch you asked to publish it, whether or not the rebase had work.
-        if [ "$PUSH" -eq 1 ] && { [ "$MOVED" -eq 1 ] || [ "$ALL" -eq 0 ]; }; then
+        # Push what moved, and what holds work origin has not got. A rebase
+        # rewrites shas without adding work, so the first covers a restack the
+        # PR needs and the second covers commits that were never sent. Neither
+        # fires for a branch this run had no reason to touch.
+        if [ "$PUSH" -eq 1 ] \
+           && { [ "$MOVED" -eq 1 ] || [ -n "$UNPUSHED" ] || [ "$ALL" -eq 0 ]; }; then
             if push_branch "$DIR" "$BRANCH" >"$PUSHOUT" 2>&1; then
                 # Origin already had it: nothing was published, so say nothing.
                 if ! grep -q 'Everything up-to-date' "$PUSHOUT"; then
@@ -655,6 +676,7 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
             fi
         fi
 
+        UNPUSHED=$(unpushed_note "$DIR" "$BRANCH" "$REF")
         row "$BRANCH" "$BASEDISP" "$(note "$NOTE")"
         [ "$VERBOSE" -eq 1 ] && cat "$OUT"
 
