@@ -16,7 +16,7 @@
 [alias]
   lg = log --pretty=format:'%C(yellow)%h%C(reset) %C(cyan)%cI%C(reset) %s %C(blue)%an%C(reset) %C(green)%d%C(reset)' --graph
   commend = commit --amend --no-edit
-  check-trees = "!git-refresh --all --prune -n --doctor"
+  check-trees = "!git-refresh --all --prune --dry-run"
   please = push --force-with-lease
   praise = blame
   prune-trees = "!git-refresh --all --prune"

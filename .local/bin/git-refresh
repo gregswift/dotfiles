@@ -18,8 +18,13 @@
 # When an `upstream` remote exists the first step fast-forwards origin's default
 # branch from upstream's, leaving everything after it a plain origin workflow.
 #
-# Rebases run with rerere disabled. In --all mode they are speculative and are
-# thrown away on conflict, so they have no business teaching rerere anything.
+# --all and --stack run every rebase with rerere.enabled=false, whatever your
+# config says. Those rebases are speculative and are thrown away the moment they
+# conflict, so they have no business recording a resolution you never reviewed,
+# and no business replaying one across twenty branches unattended.
+#
+# On a single branch rerere is left exactly as you configured it: you asked for
+# that rebase and you are standing in front of the result.
 
 set -eu
 
@@ -65,6 +70,8 @@ Options:
   -n, --dry-run   Show what would happen. Fetches, and moves nothing else:
                   no rebase, no push, no worktree removed.
   -v, --verbose   Also print git's own rebase output.
+                  Note: --all and --stack force rerere.enabled=false, since
+                  their rebases are speculative. One branch honours your config.
   --push-with-lease, --please
                   Push each branch this run rebased, refusing any push that
                   would discard commits you have not seen.
