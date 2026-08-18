@@ -708,14 +708,21 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
         [ "$NFILES" -eq 1 ] && NOUN=file || NOUN=files
         # In --all the attempt is speculative and gets thrown away. On one branch
         # you asked for it, so the conflict is left in place to resolve.
-        # Always thrown away, on one branch as on twenty. Keeping it would
-        # leave a detached HEAD behind as a side effect of refreshing, and
-        # wedge the worktree against the next run, to save re-running the one
-        # command --doctor hands over.
-        git -C "$DIR" -c rerere.enabled=false rebase --abort >/dev/null 2>&1 || true
-        row "$BRANCH" "$BASEDISP" "$(note "❌ conflict, $NFILES $NOUN")"
-        printf '%s\t%s\t%s\n' "$BRANCH" "$SAMPLE" \
-            "cd $DIR && git rebase $REF" >>"$NEEDS"
+        if [ "$ALL" -eq 1 ]; then
+            # Twenty speculative attempts cannot leave six worktrees wedged, so
+            # this one is thrown away and offered back as a command to run.
+            git -C "$DIR" -c rerere.enabled=false rebase --abort >/dev/null 2>&1 || true
+            row "$BRANCH" "$BASEDISP" "$(note "❌ conflict, $NFILES $NOUN")"
+            printf '%s\t%s\t%s\n' "$BRANCH" "$SAMPLE" \
+                "cd $DIR && git rebase $REF" >>"$NEEDS"
+        else
+            # Standing in the branch and asking for it is asking to deal with
+            # what comes back. Aborting here only means running the identical
+            # rebase again by hand to reach the same conflict.
+            row "$BRANCH" "$BASEDISP" "$(note "❌ conflict, $NFILES $NOUN, rebase in progress")"
+            printf '%s\t%s\t%s\n' "$BRANCH" "$SAMPLE" \
+                "resolve, then: git rebase --continue   (or: git rebase --abort)" >>"$NEEDS"
+        fi
         N_CONFLICT=$((N_CONFLICT + 1))
         [ "$VERBOSE" -eq 1 ] && cat "$OUT"
     fi
