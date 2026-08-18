@@ -210,8 +210,13 @@ list_worktrees() {
     '
 }
 
+# icon, branch, base, status. The base column asks the same question on every
+# line, so a branch without one gets "-" rather than a gap. Anything this run is
+# not acting on belongs to --doctor and not here.
+BRANCH_W=24
+BASE_W=16
 row() {
-    printf '%s %-12s %-44s %s\n' "$1" "$2" "$3" "$4"
+    printf '%s %-*s  %-*s  %s\n' "$1" "$BRANCH_W" "$2" "$BASE_W" "$3" "$4"
 }
 
 # ---- what to work on -------------------------------------------------------
@@ -286,12 +291,68 @@ recorded_base() { git config --get "branch.$1.base" 2>/dev/null || true; }
 
 # ---- decide each branch's base --------------------------------------------
 
-resolve_base() {  # $1 = branch; prints "<base><TAB><why>", empty if none
+# The base a branch was built on, guessed from where it forked: whichever
+# candidate shares the most recent fork point is the likeliest parent, measured
+# as the commits this branch has gained since that point.
+#
+# Not "is the candidate an ancestor". A branch a few commits behind its base
+# fails that test, so the true base is rejected while every stale merged branch
+# still contained in the history passes it, and one of those wins instead.
+#
+# A guess, not a fact, which is why it is printed for review rather than written.
+infer_base() {  # $1 = worktree dir, $2 = branch
+    _best=$DEFAULT
+    _dist=$(git -C "$1" rev-list --count \
+        "$(git -C "$1" merge-base "$DEFAULT" "$2" 2>/dev/null)..$2" 2>/dev/null) || _dist=""
+    _xsha=$(git -C "$1" rev-parse "$2")
+    while IFS="$TAB" read -r _cand _cdir; do
+        [ -n "${_cdir:-}" ] || continue
+        [ "$_cand" != "$2" ] && [ "$_cand" != "-" ] && [ "$_cand" != "$DEFAULT" ] || continue
+        _mb=$(git -C "$1" merge-base "$_cand" "$2" 2>/dev/null) || continue
+        # Fork point at this branch's own tip means the candidate sits above it
+        # in the stack, not below: that is a child, never a base.
+        [ "$_mb" != "$_xsha" ] || continue
+        _n=$(git -C "$1" rev-list --count "$_mb..$2" 2>/dev/null) || continue
+        if [ -z "$_dist" ] || [ "$_n" -lt "$_dist" ]; then _dist=$_n; _best=$_cand; fi
+    done <"$WORK"
+    printf '%s' "$_best"
+}
+
+# Where a branch merged to, for following a base merged and deleted out from
+# under its stack. One hop only: a fully collapsed chain lands on the default.
+merged_into() {
+    [ -n "${REPO:-}" ] || return 0
+    gh pr list -R "$REPO" --head "$1" --state merged --limit 1 \
+        --json baseRefName --jq '.[0].baseRefName // empty' 2>/dev/null || true
+}
+
+resolve_base() {  # $1 = branch, $2 = worktree; prints "<base><TAB><why>", or nothing
     _b=$(pr_base "$1")
     if [ -n "$_b" ]; then printf '%s\t%s' "$_b" "open PR base"; return; fi
+
     _b=$(recorded_base "$1")
-    if [ -n "$_b" ]; then printf '%s\t%s' "$_b" "recorded base"; return; fi
-    [ "$ALL" -eq 1 ] || printf '%s\t%s' "$DEFAULT" "no open PR"
+    if [ -n "$_b" ]; then
+        if git rev-parse --verify --quiet "refs/remotes/origin/$_b" >/dev/null; then
+            printf '%s\t%s' "$_b" "recorded base"; return
+        fi
+        # A recorded base whose branch is gone is what a partial stack merge
+        # leaves behind. Follow it to where it went rather than reporting a
+        # base that no longer exists.
+        _m=$(merged_into "$_b")
+        [ -n "$_m" ] || _m=$DEFAULT
+        printf '%s\t%s' "$_m" "$_b merged into $_m"; return
+    fi
+
+    if [ "$ALL" -eq 0 ]; then printf '%s\t%s' "$DEFAULT" "no open PR"; return; fi
+
+    # No PR, nothing recorded. The default branch is nearly always right, but
+    # assuming it would flatten an unopened stack onto it, so assume it only
+    # where the shape of the history agrees. infer_base falls back to the
+    # default whenever it cannot tell, so it can only withhold the assumption
+    # by positively naming another branch as the parent.
+    if [ "$(infer_base "$2" "$1")" = "$DEFAULT" ]; then
+        printf '%s\t%s' "$DEFAULT" "assumed"
+    fi
 }
 
 : >"$PLAN"
@@ -305,7 +366,7 @@ while IFS="$TAB" read -r BRANCH DIR; do
         printf '%s\t%s\t%s\t%s\n' "$BRANCH" "$DIR" "$DEFAULT" "default branch" >>"$PLAN"
         continue
     fi
-    RB=$(resolve_base "$BRANCH")
+    RB=$(resolve_base "$BRANCH" "$DIR")
     if [ -z "$RB" ]; then
         printf '%s\t%s\n' "$BRANCH" "$DIR" >>"$NOBASE"
         # "-" rather than an empty field: read collapses runs of tabs, tab being
@@ -313,6 +374,9 @@ while IFS="$TAB" read -r BRANCH DIR; do
         printf '%s\t%s\t-\t%s\n' "$BRANCH" "$DIR" "no base" >>"$PLAN"
     else
         printf '%s\t%s\t%s\n' "$BRANCH" "$DIR" "$RB" >>"$PLAN"
+        # Assumed rather than known. Act on it, but keep the nudge to record
+        # the real one, which is the only thing that makes it known.
+        case "$RB" in *"${TAB}assumed") printf '%s\t%s\n' "$BRANCH" "$DIR" >>"$NOBASE" ;; esac
     fi
 done <"$WORK"
 
@@ -387,6 +451,9 @@ push_branch() {
     fi
 }
 
+BRANCH_W=$(cut -f1 "$PLAN" | awk '{ if (length > m) m = length } END { print (m > 10 ? m : 10) }')
+BASE_W=$(cut -f3 "$PLAN" | awk '{ if (length > m) m = length } END { print (m > 6 ? m : 6) }')
+
 N_REBASED=0; N_CURRENT=0; N_CONFLICT=0; N_DIRTY=0; N_NOBASE=0; N_OTHER=0
 N_TOTAL=0; N_WOULD=0; N_PUSHED=0; N_REFUSED=0; N_WOULDCLASH=0
 N_SYNCED=0; N_DIVERGED=0
@@ -396,7 +463,7 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
     N_TOTAL=$((N_TOTAL + 1))
 
     if [ "$BRANCH" = "-" ]; then
-        row "⏭️ " "detached" "$(basename "$DIR")" "detached HEAD"
+        row "⏭️ " "$(basename "$DIR")" "-" "detached"
         N_OTHER=$((N_OTHER + 1)); continue
     fi
     if [ ! -d "$DIR" ]; then
@@ -405,14 +472,17 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
         # plain git's business, not this run's.
         if [ "$PRUNE" -eq 1 ] \
            && ! git rev-parse --verify --quiet "refs/remotes/origin/$BRANCH" >/dev/null; then
-            row "⏭️ " "gone" "$BRANCH" "directory missing"
+            row "⏭️ " "$BRANCH" "-" "gone"
         else
-            row "⏭️ " "gone" "$BRANCH" "directory missing, run: git worktree prune"
+            row "⏭️ " "$BRANCH" "-" "gone"
+            printf '%s\t%s\t%s\n' "$BRANCH" \
+                "the worktree directory is gone, but the branch is still on origin" \
+                "git worktree prune" >>"$NEEDS"
         fi
         N_OTHER=$((N_OTHER + 1)); continue
     fi
     if [ "$BASE" = "-" ]; then
-        row "⏭️ " "no base" "$BRANCH" "no open PR and none recorded"
+        row "⏭️ " "$BRANCH" "-" "no base"
         N_NOBASE=$((N_NOBASE + 1)); continue
     fi
 
@@ -420,7 +490,10 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
     if ! git -C "$DIR" diff --quiet || ! git -C "$DIR" diff --cached --quiet; then
         [ "$ALL" -eq 1 ] || die "you have uncommitted changes; commit or stash them first"
         COUNT=$(git -C "$DIR" status --porcelain | grep -vc '^??' || true)
-        row "⏭️ " "dirty" "$BRANCH" "$COUNT modified"
+        row "⏭️ " "$BRANCH" "$BASE" "dirty"
+        printf '%s\t%s\t%s\n' "$BRANCH" \
+            "$COUNT uncommitted change(s), so it was left alone" \
+            "cd $DIR && git status" >>"$NEEDS"
         N_DIRTY=$((N_DIRTY + 1)); continue
     fi
 
@@ -429,10 +502,14 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
     elif git rev-parse --verify --quiet "$BASE" >/dev/null; then
         REF=$BASE
     else
-        row "⏭️ " "no base" "$BRANCH" "$BASE is not fetched"
+        row "⏭️ " "$BRANCH" "$BASE" "no base"
         printf '%s\t%s\n' "$BRANCH" "$DIR" >>"$NOBASE"
         N_NOBASE=$((N_NOBASE + 1)); continue
     fi
+
+    # The default branch has nothing under it, so the column reads "-" rather
+    # than pointing at itself.
+    [ "$BRANCH" = "$DEFAULT" ] && BASEDISP="-" || BASEDISP="${REF#origin/}"
 
     # A branch can be stale against its own remote, not just against its base:
     # someone rebases it elsewhere and force-pushes, leaving these commits as
@@ -509,14 +586,14 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
             SAMPLE=$(printf '%s\n' "$CLASH" | grep . | head -3 | tr '\n' ' ')
             [ "$NFILES" -gt 3 ] && SAMPLE="$SAMPLE(+$((NFILES - 3)) more)"
             [ "$NFILES" -eq 1 ] && NOUN=file || NOUN=files
-            row "⚠️ " "would clash" "$BRANCH" "→ $REF ($NFILES $NOUN)"
+            row "⚠️ " "$BRANCH" "$BASEDISP" "clash"
             printf '%s\t%s\t%s\n' "$BRANCH" \
                 "would likely conflict in: $SAMPLE" \
                 "cd $DIR && git rebase $REF" >>"$NEEDS"
             N_WOULDCLASH=$((N_WOULDCLASH + 1))
         else
             [ "$PUSH" -eq 1 ] && THEN=", then push" || THEN=""
-            row "🔄" "would rebase" "$BRANCH" "→ $REF ($WHY)$SYNCNOTE$THEN"
+            row "🔄" "$BRANCH" "$BASEDISP" "rebase"
             N_WOULD=$((N_WOULD + 1))
         fi
         continue
@@ -526,9 +603,10 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
         DETAIL="→ $REF ($WHY)$SYNCNOTE"
         if grep -q 'is up to date' "$OUT"; then
             ICON="➖"; STATUS=current; MOVED=0
+            [ -z "$SYNCNOTE" ] || { ICON="✅"; STATUS=synced; }
             N_CURRENT=$((N_CURRENT + 1))
         else
-            ICON="✅"; STATUS=rebased; MOVED=1
+            ICON="✅"; STATUS=rebase; MOVED=1
             N_REBASED=$((N_REBASED + 1))
         fi
 
@@ -555,7 +633,7 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
             fi
         fi
 
-        row "$ICON" "$STATUS" "$BRANCH" "$DETAIL"
+        row "$ICON" "$BRANCH" "$BASEDISP" "$STATUS"
         [ "$VERBOSE" -eq 1 ] && cat "$OUT"
 
         if [ "$INTERACTIVE" -eq 1 ]; then
@@ -572,7 +650,7 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
         # In --all the attempt is speculative and gets thrown away. On one branch
         # you asked for it, so the conflict is left in place to resolve.
         [ "$ALL" -eq 1 ] && git -C "$DIR" -c rerere.enabled=false rebase --abort >/dev/null 2>&1 || true
-        row "❌" "conflict" "$BRANCH" "→ $REF ($NFILES $NOUN)"
+        row "❌" "$BRANCH" "$BASEDISP" "clash"
         printf '%s\t%s\t%s\n' "$BRANCH" "$SAMPLE" "cd $DIR && git rebase $REF" >>"$NEEDS"
         N_CONFLICT=$((N_CONFLICT + 1))
         [ "$VERBOSE" -eq 1 ] && cat "$OUT"
@@ -717,32 +795,6 @@ fi
 
 # ---- --doctor --------------------------------------------------------------
 
-# The base a branch was built on, guessed from where it forked: whichever
-# candidate shares the most recent fork point is the likeliest parent, measured
-# as the commits this branch has gained since that point.
-#
-# Not "is the candidate an ancestor". A branch a few commits behind its base
-# fails that test, so the true base is rejected while every stale merged branch
-# still contained in the history passes it, and one of those wins instead.
-#
-# A guess, not a fact, which is why it is printed for review rather than written.
-infer_base() {  # $1 = worktree dir, $2 = branch
-    _best=$DEFAULT
-    _dist=$(git -C "$1" rev-list --count \
-        "$(git -C "$1" merge-base "$DEFAULT" "$2" 2>/dev/null)..$2" 2>/dev/null) || _dist=""
-    _xsha=$(git -C "$1" rev-parse "$2")
-    while IFS="$TAB" read -r _cand _cdir; do
-        [ -n "${_cdir:-}" ] || continue
-        [ "$_cand" != "$2" ] && [ "$_cand" != "-" ] && [ "$_cand" != "$DEFAULT" ] || continue
-        _mb=$(git -C "$1" merge-base "$_cand" "$2" 2>/dev/null) || continue
-        # Fork point at this branch's own tip means the candidate sits above it
-        # in the stack, not below: that is a child, never a base.
-        [ "$_mb" != "$_xsha" ] || continue
-        _n=$(git -C "$1" rev-list --count "$_mb..$2" 2>/dev/null) || continue
-        if [ -z "$_dist" ] || [ "$_n" -lt "$_dist" ]; then _dist=$_n; _best=$_cand; fi
-    done <"$WORK"
-    printf '%s' "$_best"
-}
 
 if [ "$DOCTOR" -eq 1 ] && [ "$ATTENTION" -gt 0 ]; then
     printf '\n🩺 Needs you (%s):\n' "$ATTENTION"
