@@ -62,7 +62,8 @@ Options:
                   the ones a rebase here would strand.
   -i, --interactive
                   Follow the rebase with an interactive pass. One branch only.
-  -n, --dry-run   Show what would happen; rebase nothing.
+  -n, --dry-run   Show what would happen. Fetches, and moves nothing else:
+                  no rebase, no push, no worktree removed.
   -v, --verbose   Also print git's own rebase output.
   --push-with-lease, --please
                   Push each branch this run rebased, refusing any push that
@@ -77,9 +78,9 @@ Options:
                   with commits of its own is reported and left alone.
   --doctor        Recommend what to do about everything the run reported:
                   conflicts, branches with no base, worktrees held back from
-                  pruning. Implies --dry-run and changes nothing, so a
-                  conflict is predicted rather than met, and the prediction
-                  merges the two tips where a rebase replays each commit.
+                  pruning. Implies --dry-run, so a conflict is predicted
+                  rather than met, and the prediction merges the two tips
+                  where a rebase replays each commit.
   --no-icons      Drop the emoji from the status column and the messages.
   --color[=<when>], --no-color
                   when is auto (a terminal only, and not under NO_COLOR),
@@ -437,11 +438,12 @@ fi
 # the fetch changed about your branches is what the rows below are for.
 [ "$VERBOSE" -eq 1 ] && FETCH_QUIET="" || FETCH_QUIET="--quiet"
 
-if [ "$DRY_RUN" -eq 1 ]; then
-    git fetch --all --prune --dry-run $FETCH_QUIET
-else
-    git fetch --all --prune $FETCH_QUIET
-fi
+# A real fetch even for a dry run. What --dry-run leaves alone is the
+# remote-tracking refs, which are the only thing a dry run has to predict
+# against: with them stale it answers about the origin of the last real fetch,
+# and reports a branch clean that conflicts a second later. Nothing of yours is
+# a remote-tracking ref, so there is no work here for a dry run to protect.
+git fetch --all --prune $FETCH_QUIET
 
 DEFAULT=$(remote_head origin)
 [ -n "$DEFAULT" ] || die "cannot resolve origin/HEAD; run: git remote set-head origin --auto"
