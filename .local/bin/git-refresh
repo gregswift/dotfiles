@@ -253,14 +253,24 @@ unpushed_note() {  # $1 = worktree, $2 = branch, $3 = base ref
 # like every other one. Both paths call this: a dry run is where --doctor reads.
 report_unpushed() {
     case "$UNPUSHED" in
-        "") ;;
+        "") return ;;
         "not on origin")
-            printf '%s\t%s\t%s\n' "$BRANCH" \
-                "this branch has never been pushed; it exists only here" \
-                "git push -u origin $BRANCH" >>"$NEEDS" ;;
-        *)  printf '%s\t%s\t%s\n' "$BRANCH" \
-                "$UNPUSHED: commits here that origin has not got" \
-                "git push   (or: git refresh --please)" >>"$NEEDS" ;;
+            _n=$(git -C "$DIR" log --format='%h  %s' "$REF..HEAD" 2>/dev/null | tr '\n' '|')
+            if [ -z "$_n" ]; then
+                # Not on origin and nothing on it either: a branch in name only.
+                printf '%s\t%s\t%s\n' "$BRANCH" \
+                    "not on origin, and carries no commits of its own" \
+                    "git worktree remove $DIR && git branch -d $BRANCH   if it is finished with" >>"$NEEDS"
+            else
+                printf '%s\t%s\t%s\t%s\n' "$BRANCH" \
+                    "not on origin; these commits exist only here" \
+                    "git push -u origin $BRANCH" "$_n" >>"$NEEDS"
+            fi ;;
+        *)  _n=$(git -C "$DIR" cherry -v "origin/$BRANCH" "$BRANCH" "$REF" 2>/dev/null \
+                 | sed -n 's/^+ \([0-9a-f]\{9\}\)[0-9a-f]* /\1  /p' | tr '\n' '|')
+            printf '%s\t%s\t%s\t%s\n' "$BRANCH" \
+                "${UNPUSHED% unpushed} commits here that origin has not got" \
+                "git push   (or: git refresh --please)" "$_n" >>"$NEEDS" ;;
     esac
 }
 
@@ -672,7 +682,7 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
            && grep -q '^[0-7]\{6\} [0-9a-f]* [123]	' "$OUT"; then
             CLASH=$(awk -F'\t' '/^[0-7]{6} [0-9a-f]+ [123]\t/ { print $2 }' "$OUT" | sort -u)
             NFILES=$(printf '%s' "$CLASH" | grep -c . || true)
-            SAMPLE=$(printf '%s\n' "$CLASH" | grep . | tr '\n' ' ')
+            SAMPLE=$(printf '%s\n' "$CLASH" | grep . | tr '\n' '|')
             [ "$NFILES" -eq 1 ] && NOUN=file || NOUN=files
             row "$BRANCH" "$BASEDISP" "$(note "⚠️  conflict, $NFILES $NOUN")"
             printf '%s\t%s\t%s\t%s\n' "$BRANCH" \
@@ -742,7 +752,7 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
     else
         UNMERGED=$(git -C "$DIR" diff --name-only --diff-filter=U 2>/dev/null || true)
         NFILES=$(printf '%s' "$UNMERGED" | grep -c . || true)
-        SAMPLE=$(printf '%s\n' "$UNMERGED" | grep . | tr '\n' ' ')
+        SAMPLE=$(printf '%s\n' "$UNMERGED" | grep . | tr '\n' '|')
         [ "$NFILES" -eq 1 ] && NOUN=file || NOUN=files
         # In --all the attempt is speculative and gets thrown away. On one branch
         # you asked for it, so the conflict is left in place to resolve.
@@ -930,7 +940,7 @@ if [ "$DOCTOR" -eq 1 ] && [ "$ATTENTION" -gt 0 ]; then
     while IFS="$TAB" read -r B DETAIL REMEDY FILES; do
         [ -n "${REMEDY:-}" ] || continue
         printf '\n  %s\n' "$DETAIL"
-        for _f in ${FILES:-}; do printf '      %s\n' "$_f"; done
+        [ -z "${FILES:-}" ] || printf '%s\n' "$FILES" | tr '|' '\n' | grep . | sed 's/^/      /' 
         printf '  → %s\n' "$REMEDY"
     done <"$NEEDS"
 
