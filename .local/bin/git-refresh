@@ -284,6 +284,42 @@ note() {  # $1 = what happened, possibly empty
     printf '%s' "$_parts"
 }
 
+# The table gives the base a column of its own. One branch has no table, so
+# the sentence has to carry it, and a push you asked for by name is an outcome
+# even when it turns out origin already had the branch.
+single_note() {  # reads MOVED, BASEDISP, SYNCNOTE, PUSHKIND, PRE_UNPUSHED
+    [ "$MOVED" -eq 1 ] && _what="rebased onto $BASEDISP" || _what="current with $BASEDISP"
+    _what="$_what$SYNCNOTE"
+
+    case "$PUSHKIND" in
+        pushed)
+            # A rebase rewrote every sha, so a count of what went up says
+            # nothing. A push without one published exactly the commits that
+            # were sitting here.
+            if [ "$MOVED" -eq 1 ]; then
+                _what="$_what, pushed"
+            else
+                case "$PRE_UNPUSHED" in
+                    *' unpushed') _n=${PRE_UNPUSHED% unpushed}
+                                  [ "$_n" = 1 ] && _c=commit || _c=commits
+                                  _what="$_what, pushed $_n $_c" ;;
+                    *)            _what="$_what, pushed" ;;
+                esac
+            fi ;;
+        uptodate) _what="$_what, origin already has it" ;;
+        refused)  _what="$_what, push refused" ;;
+    esac
+
+    if [ "$PUSHKIND" = refused ]; then
+        _icon=❌
+    elif [ "$MOVED" -eq 1 ] || [ "$PUSHKIND" = pushed ] || [ -n "$SYNCNOTE" ]; then
+        _icon=✅
+    else
+        _icon=➖
+    fi
+    printf '%s %s' "$_icon" "$_what"
+}
+
 SINGLE_NOTE=""
 SINGLE_BASE=""
 row() {
@@ -322,10 +358,15 @@ fi
 
 # ---- refresh the remotes ---------------------------------------------------
 
+# A fetch over every remote narrates every ref that moved, and GitHub's
+# refs/pull/* move whenever anyone force-pushes any PR in the repository. What
+# the fetch changed about your branches is what the rows below are for.
+[ "$VERBOSE" -eq 1 ] && FETCH_QUIET="" || FETCH_QUIET="--quiet"
+
 if [ "$DRY_RUN" -eq 1 ]; then
-    git fetch --all --prune --dry-run
+    git fetch --all --prune --dry-run $FETCH_QUIET
 else
-    git fetch --all --prune
+    git fetch --all --prune $FETCH_QUIET
 fi
 
 DEFAULT=$(remote_head origin)
@@ -700,6 +741,9 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
     fi
 
     if git_rebase "$DIR" "$REF" >"$OUT" 2>&1; then
+        # A push clears this, and how much it published is worth saying.
+        PRE_UNPUSHED=$UNPUSHED
+        PUSHKIND=""
         if grep -q 'is up to date' "$OUT"; then
             NOTE="➖ current"; MOVED=0
             [ -z "$SYNCNOTE" ] || NOTE="✅ synced"
@@ -722,14 +766,20 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
         if [ "$PUSH" -eq 1 ] \
            && { [ "$MOVED" -eq 1 ] || [ -n "$UNPUSHED" ] || [ "$ALL" -eq 0 ]; }; then
             if push_branch "$DIR" "$BRANCH" >"$PUSHOUT" 2>&1; then
-                # Origin already had it: nothing was published, so say nothing.
-                if ! grep -q 'Everything up-to-date' "$PUSHOUT"; then
+                if grep -q 'Everything up-to-date' "$PUSHOUT"; then
+                    # Nothing was published. In a table of twenty that is not
+                    # worth a row of its own; on the branch you asked to push,
+                    # it is the answer.
+                    PUSHKIND=uptodate
+                else
                     # Say which happened: a push behind a rebase is a restack,
                     # a push on its own only published what was already here.
                     [ "$MOVED" -eq 1 ] && NOTE="✅ pushed" || NOTE="✅ pushed, no rebase needed"
+                    PUSHKIND=pushed
                     N_PUSHED=$((N_PUSHED + 1))
                 fi
             else
+                PUSHKIND=refused
                 NOTE="❌ push refused"
                 printf '%s\t%s\t%s\n' "$BRANCH" \
                     "origin/$BRANCH has commits this rebase would discard" \
@@ -741,6 +791,7 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
 
         UNPUSHED=$(unpushed_note "$DIR" "$BRANCH" "$REF")
         report_unpushed
+        [ "$ALL" -eq 1 ] || NOTE=$(single_note)
         row "$BRANCH" "$BASEDISP" "$(note "$NOTE")"
         [ "$VERBOSE" -eq 1 ] && cat "$OUT"
 
