@@ -400,7 +400,15 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
         N_OTHER=$((N_OTHER + 1)); continue
     fi
     if [ ! -d "$DIR" ]; then
-        row "⏭️ " "gone" "$BRANCH" "directory missing, see git prune-worktrees"
+        # --prune clears the record itself, but only for a branch already gone
+        # from origin. A branch still live there with a missing directory is
+        # plain git's business, not this run's.
+        if [ "$PRUNE" -eq 1 ] \
+           && ! git rev-parse --verify --quiet "refs/remotes/origin/$BRANCH" >/dev/null; then
+            row "⏭️ " "gone" "$BRANCH" "directory missing"
+        else
+            row "⏭️ " "gone" "$BRANCH" "directory missing, run: git worktree prune"
+        fi
         N_OTHER=$((N_OTHER + 1)); continue
     fi
     if [ "$BASE" = "-" ]; then
