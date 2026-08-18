@@ -211,7 +211,7 @@ list_worktrees() {
 }
 
 row() {
-    printf '%s %-9s %-44s %s\n' "$1" "$2" "$3" "$4"
+    printf '%s %-12s %-44s %s\n' "$1" "$2" "$3" "$4"
 }
 
 # ---- what to work on -------------------------------------------------------
@@ -509,14 +509,14 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
             SAMPLE=$(printf '%s\n' "$CLASH" | grep . | head -3 | tr '\n' ' ')
             [ "$NFILES" -gt 3 ] && SAMPLE="$SAMPLE(+$((NFILES - 3)) more)"
             [ "$NFILES" -eq 1 ] && NOUN=file || NOUN=files
-            row "⚠️ " "clash" "$BRANCH" "→ $REF ($NFILES $NOUN)"
+            row "⚠️ " "would clash" "$BRANCH" "→ $REF ($NFILES $NOUN)"
             printf '%s\t%s\t%s\n' "$BRANCH" \
                 "would likely conflict in: $SAMPLE" \
                 "cd $DIR && git rebase $REF" >>"$NEEDS"
             N_WOULDCLASH=$((N_WOULDCLASH + 1))
         else
             [ "$PUSH" -eq 1 ] && THEN=", then push" || THEN=""
-            row "🔄" "would" "$BRANCH" "→ $REF ($WHY)$SYNCNOTE$THEN"
+            row "🔄" "would rebase" "$BRANCH" "→ $REF ($WHY)$SYNCNOTE$THEN"
             N_WOULD=$((N_WOULD + 1))
         fi
         continue
