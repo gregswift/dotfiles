@@ -620,7 +620,10 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
             [ -z "$SYNCNOTE" ] || NOTE="✅ synced"
             N_CURRENT=$((N_CURRENT + 1))
         else
-            NOTE=""; MOVED=1
+            # A real run has an outcome to report and this is it: the branch
+            # moved and its commits were rewritten. Only a dry run, which has
+            # no outcome, leaves the ordinary case blank.
+            NOTE="✅ rebased"; MOVED=1
             N_REBASED=$((N_REBASED + 1))
         fi
 
