@@ -148,7 +148,7 @@
     "foreground_templates": [
         "{{ if eq .Code 0 }}p:success{{ else }}p:error{{ end }}"
     ],
-    "template": "# "
+    "template": "{{ if .Interrupted }}<red>^C </>{{ end }}{{.PWD}} # "
   },
   "console_title_template": "{{ .Folder }}",
   "final_space": true,
