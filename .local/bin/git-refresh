@@ -93,6 +93,18 @@ EOF
 
 die() { printf '❌ %s\n' "$*" >&2; exit 1; }
 
+# A rebase in progress leaves a detached HEAD, so say which of the two this is.
+# Reporting "check out a branch" to someone mid-rebase sends them the wrong way.
+no_branch_here() {  # $1 = worktree dir
+    _gd=$(git -C "$1" rev-parse --git-path rebase-merge 2>/dev/null)
+    _ga=$(git -C "$1" rev-parse --git-path rebase-apply 2>/dev/null)
+    if [ -d "$_gd" ] || [ -d "$_ga" ]; then
+        die "a rebase is already in progress here: finish it with git rebase --continue, or throw it away with git rebase --abort"
+    fi
+    die "detached HEAD; check out a branch first"
+}
+
+
 while [ $# -gt 0 ]; do
     case "$1" in
         --all)        ALL=1 ;;
@@ -154,7 +166,7 @@ if [ "$STACK" -eq 1 ]; then
     [ "$(git rev-parse --is-inside-work-tree 2>/dev/null || echo false)" = "true" ] \
         || die "--stack starts from a branch; stand in a worktree, or use --all"
     STACK_ROOT=$(git branch --show-current)
-    [ -n "$STACK_ROOT" ] || die "detached HEAD; --stack needs a branch to start from"
+    [ -n "$STACK_ROOT" ] || no_branch_here .
     # Every branch-at-a-time behaviour below keys off ALL: skip a dirty worktree
     # rather than refuse, throw a conflicted rebase away, order by base.
     ALL=1
@@ -238,7 +250,10 @@ note() {  # $1 = what happened, possibly empty
     printf '%s' "$_parts"
 }
 
+SINGLE_NOTE=""
+SINGLE_BASE=""
 row() {
+    if [ "$ALL" -eq 0 ]; then SINGLE_BASE=$2; SINGLE_NOTE=$3; return; fi
     if [ -n "$3" ]; then
         printf '%-*s  %-*s  %s\n' "$BRANCH_W" "$1" "$BASE_W" "$2" "$3"
     else
@@ -252,7 +267,7 @@ if [ "$ALL" -eq 1 ]; then
     list_worktrees >"$WORK"
 else
     CUR=$(git branch --show-current)
-    [ -n "$CUR" ] || die "detached HEAD; check out a branch first"
+    [ -n "$CUR" ] || no_branch_here .
     printf '%s\t%s\n' "$CUR" "$(git rev-parse --show-toplevel)" >"$WORK"
 fi
 
@@ -693,9 +708,19 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
         [ "$NFILES" -eq 1 ] && NOUN=file || NOUN=files
         # In --all the attempt is speculative and gets thrown away. On one branch
         # you asked for it, so the conflict is left in place to resolve.
-        [ "$ALL" -eq 1 ] && git -C "$DIR" -c rerere.enabled=false rebase --abort >/dev/null 2>&1 || true
-        row "$BRANCH" "$BASEDISP" "$(note "❌ conflict, $NFILES $NOUN")"
-        printf '%s\t%s\t%s\n' "$BRANCH" "$SAMPLE" "cd $DIR && git rebase $REF" >>"$NEEDS"
+        if [ "$ALL" -eq 1 ]; then
+            git -C "$DIR" -c rerere.enabled=false rebase --abort >/dev/null 2>&1 || true
+            row "$BRANCH" "$BASEDISP" "$(note "❌ conflict, $NFILES $NOUN")"
+            printf '%s\t%s\t%s\n' "$BRANCH" "$SAMPLE" \
+                "cd $DIR && git rebase $REF" >>"$NEEDS"
+        else
+            # Left where it stands, because this is the branch you asked for.
+            # Say so: a rebase is running and the worktree is on a detached
+            # HEAD until it is finished or thrown away.
+            row "$BRANCH" "$BASEDISP" "$(note "❌ conflict, $NFILES $NOUN, rebase in progress")"
+            printf '%s\t%s\t%s\n' "$BRANCH" "$SAMPLE" \
+                "resolve, then: git rebase --continue   (or: git rebase --abort)" >>"$NEEDS"
+        fi
         N_CONFLICT=$((N_CONFLICT + 1))
         [ "$VERBOSE" -eq 1 ] && cat "$OUT"
     fi
@@ -833,7 +858,15 @@ fi
 # Distinct branches, not a sum of counters: one branch can be both held back
 # from pruning and missing a base, and saying "4" for three branches is a lie.
 ATTENTION=$( { cut -f1 "$NEEDS"; cut -f1 "$NOBASE"; } 2>/dev/null | sort -u | grep -c . || true )
-if [ "$ATTENTION" -gt 0 ] && [ "$DOCTOR" -eq 0 ]; then
+if [ "$ALL" -eq 0 ]; then
+    # Which branch and which base are what you already knew by standing here.
+    # A dry run with nothing to report still owes you the base it picked.
+    LINE=$SINGLE_NOTE
+    [ -n "$LINE" ] || LINE="would rebase onto $SINGLE_BASE"
+    [ "$ATTENTION" -eq 0 ] || [ "$DOCTOR" -eq 1 ] \
+        || LINE="$LINE. run again with --doctor to see what to do"
+    printf '%s\n' "$LINE"
+elif [ "$ATTENTION" -gt 0 ] && [ "$DOCTOR" -eq 0 ]; then
     printf '\n%s need you; run again with --doctor to see what to do\n' "$ATTENTION"
 fi
 
