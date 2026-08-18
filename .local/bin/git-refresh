@@ -460,7 +460,9 @@ push_branch() {
 }
 
 BRANCH_W=$(cut -f1 "$PLAN" | awk '{ if (length > m) m = length } END { print (m > 10 ? m : 10) }')
-BASE_W=$(cut -f3 "$PLAN" | awk '{ if (length > m) m = length } END { print (m > 6 ? m : 6) }')
+# The plan holds bare branch names; the column shows the ref they resolve to,
+# which is seven characters longer for everything that lives on origin.
+BASE_W=$(cut -f3 "$PLAN" | awk '{ if (length > m) m = length } END { m += 7; print (m > 11 ? m : 11) }')
 
 [ "$ALL" -eq 0 ] || row "BRANCH" "BASE" "STATUS"
 
@@ -517,9 +519,13 @@ while IFS="$TAB" read -r BRANCH DIR BASE WHY; do
         N_NOBASE=$((N_NOBASE + 1)); continue
     fi
 
-    # The default branch has nothing under it, so the column reads "-" rather
-    # than pointing at itself.
-    [ "$BRANCH" = "$DEFAULT" ] && BASEDISP="-" || BASEDISP="${REF#origin/}"
+    # The ref as it is actually used. Every rebase here targets the remote
+    # branch, never the local one of the same name, and that is the whole
+    # reason a stack needs its lower branches pushed before the ones above it
+    # will land on anything new. Printing a bare name would hide that. The
+    # default branch is no exception: it is updated from origin/<default> like
+    # everything else, so it gets the ref rather than a dash.
+    BASEDISP=$REF
 
     # A branch can be stale against its own remote, not just against its base:
     # someone rebases it elsewhere and force-pushes, leaving these commits as
