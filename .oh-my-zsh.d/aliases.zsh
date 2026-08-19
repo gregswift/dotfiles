@@ -1,5 +1,14 @@
 # My Git enablement aliases/functions
-gwt() { local d; d=$(git new-worktree "$@") || return; cd "$d"; }
+
+# gwt has to be a shell function, because only your own shell can cd. It ships
+# with git-refresh; source it rather than copying it, so the definition tracks
+# the package. Homebrew first, then a `make install PREFIX=$HOME/.local` build.
+for f in /opt/homebrew/share/git-refresh/gwt.sh \
+         /usr/local/share/git-refresh/gwt.sh \
+         "${HOME}/.local/share/git-refresh/gwt.sh"; do
+  [[ -r ${f} ]] && { source "${f}"; break; }
+done
+unset f
 
 alias git-rebase='printf "use: git refresh -i\n" >&2; false'
 alias git-new-worktree='printf "use: gwt <branch>  (git new-worktree does not cd)\n" >&2; false'

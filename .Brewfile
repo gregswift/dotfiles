@@ -22,6 +22,8 @@ brew "fzf"
 brew "gh"
 # Newer git than MacOS provides
 brew "git"
+# My git worktree/rebase tooling
+brew "gregswift/tap/git-refresh"
 # Helm Chart CLI
 brew "helm"
 # JQ cli tool for working with json

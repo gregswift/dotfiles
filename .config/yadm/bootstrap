@@ -194,6 +194,20 @@ else
     log_info "Installing expected packages via DNF..."
     dnf shell "${HOME}/.dnffile"
   fi
+
+  # git-refresh has no RPM yet, so build it from source into ~/.local. When it
+  # is published to COPR this whole block becomes a line in ~/.dnffile.
+  GIT_REFRESH_SRC="${HOME}/.local/src/git-refresh"
+  if [ -d "${GIT_REFRESH_SRC}" ]; then
+    log_info "Updating git-refresh..."
+    git -C "${GIT_REFRESH_SRC}" pull --ff-only
+  else
+    log_info "Cloning git-refresh..."
+    git clone https://github.com/gregswift/git-refresh "${GIT_REFRESH_SRC}"
+  fi
+  log_info "Installing git-refresh into ${HOME}/.local..."
+  make -C "${GIT_REFRESH_SRC}" install PREFIX="${HOME}/.local"
+
   install_oh_my_zsh
 fi
 

@@ -1,6 +1,15 @@
 [url "ssh://git@github.com/"]
   insteadOf = https://github.com/
 
+# git-refresh ships its own aliases (check-trees, prune-trees, commend, please).
+# Include them rather than copying them, so renames and additions arrive with the
+# package. Git ignores an include path that does not exist, so both lines are
+# safe on either platform: Homebrew, then a PREFIX=$HOME/.local build.
+[include]
+  path = /opt/homebrew/share/git-refresh/refresh.gitconfig
+[include]
+  path = ~/.local/share/git-refresh/refresh.gitconfig
+
 [include]
   path = ~/.gitconfig.personal
 
@@ -15,11 +24,7 @@
 
 [alias]
   lg = log --pretty=format:'%C(yellow)%h%C(reset) %C(cyan)%cI%C(reset) %s %C(blue)%an%C(reset) %C(green)%d%C(reset)' --graph
-  commend = commit --amend --no-edit
-  check-trees = "!git-refresh --all --prune --dry-run"
-  please = push --force-with-lease
   praise = blame
-  prune-trees = "!git-refresh --all --prune"
   review = log --summary --patch --stat=100 --dirstat --ignore-all-space --reverse --decorate --find-renames=33 --find-copies-harder --cc
   supdate = submodule update --init --rebase
   supgrade = submodule update --init --remote --rebase
