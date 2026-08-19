@@ -302,6 +302,10 @@ if [ "${system_type}" = "Darwin" ]; then
   fi
 fi
 
-# Adds the font for the current oh-my-posh prompt
-oh-my-posh font install --headless Meslo
+# Adds the font for the current oh-my-posh prompt. A font name as an argument is
+# already non-interactive; the --headless flag that used to force that is gone.
+prompt_init "Meslo Nerd Font" \
+  "install the Nerd Font the oh-my-posh prompt expects" \
+  "oh-my-posh font install Meslo" \
+  "ls ${HOME}/Library/Fonts/MesloLG* || ls ${HOME}/.local/share/fonts/MesloLG*"
 
