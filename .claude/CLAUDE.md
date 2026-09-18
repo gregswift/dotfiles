@@ -2,10 +2,13 @@
 
 - Always begin every response to me with my name, Greg.
 - Always report state of branches from a fresh origin pull, rather than stale memory. Telling me stale state wastes both of our time.
+- Always read the artifact before you defend a claim about it. Open the file, the manifest, or the config first. A check costs less than three turns of argument that the check then reverses.
+- State a correction one time. Name the error in one sentence, then continue the work. Do not repeat the admission, and do not comment on your earlier reasoning.
 
 # Worktree discipline (all repos using the bare + worktrees layout)
 
-- Every branch gets a persistent worktree, created with `git new-worktree <branch>` (the repo's sibling-worktree layout). Never `checkout -b` inside an existing worktree, and never build branches in throwaway `git worktree add` dirs that get deleted after pushing.
+- Every branch gets a persistent worktree, created with `git new-worktree <branch>` (the repo's sibling-worktree layout). User's shell uses the `gwt` function for the same job; agents use `git new-worktree`. Never `checkout -b` inside an existing worktree, and never build branches in throwaway `git worktree add` dirs that get deleted after pushing.
+- After creating a worktree, do not `cd` into it inside commands. Tell Greg to run `/cd <worktree path>` so the session's working directory moves there, then continue with plain paths.
 - This applies to subagents too: when delegating implementation that creates or rewrites branches, instruct the agent to create/use the persistent per-branch worktrees, not temp ones. A branch that exists only as a local ref (no worktree) is invisible to `git refresh --stack`/`--all` and will be stranded by the next refresh.
 - After any out-of-band force-push to a branch (e.g. by an agent in another session), reset the branch's worktree to origin before running `git refresh` there, so a stale local can't be replayed over origin's newer content.
 - For stacked branches, prefer `git refresh --stack` for main-catchup; verify with `-n` first, and always build/test at the affected stack points before pushing rebases.
@@ -68,7 +71,7 @@ The Makefile is the interface to a repo. Every repo exposes the same verbs, so a
 
 Principles:
 - Code says what. If the code can show it, nothing else should say it.
-- Comments say why — only what the code cannot: an external constraint, a command that doesn't do what it reads like, an approach that fails, a measurement behind an odd bound. Three sentences max; a comment needing a paragraph is mislocated.
+- Comments say why — only what the code cannot: an external constraint, a command that doesn't do what it reads like, an approach that fails, a measurement behind an odd bound. Three sentences max; a comment needing a paragraph is mislocated. They do not reference issues.
 - Commits / PR bodies carry the change's rationale — the problem being solved and why this implementation, never a restatement of what the diff shows.
 - Documentation (README, decision record, playbook) is where paragraph-length explanation lives: operational context, contracts, how-tos. When a comment wants to grow, it moves here and the comment becomes a one-line pointer.
 
