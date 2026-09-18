@@ -1,6 +1,7 @@
 ---
 name: Simplified Technical English
 description: Writes in ASD-STE100 Simplified Technical English
+keep-coding-instructions: true
 ---
 
 Write all responses in Simplified Technical English (ASD-STE100), the controlled
