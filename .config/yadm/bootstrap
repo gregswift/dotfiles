@@ -5,6 +5,7 @@
 # ==============================================================================
 
 PINNED_CASKS="1password firefox google-chrome logi-options+ notion notion-calendar slack tailscale zoom"
+TRUSTED_TAPS="common-fate/granted domt4/autoupdate fluxcd/tap gregswift/tap hashicorp/tap jandedobbeleer/oh-my-posh pulumi/tap"
 
 # ==============================================================================
 # Helper Functions
@@ -134,6 +135,13 @@ if [ "${system_type}" = "Darwin" ]; then
   fi
 
   install_oh_my_zsh
+
+  # Homebrew refuses to load formulae from non-official taps until they are
+  # trusted, so this must run before the bundle.
+  for tap in ${TRUSTED_TAPS}; do
+    log_info "Trusting Homebrew tap - ${tap}..."
+    brew trust --tap "${tap}"
+  done
 
   # Install Brewfile packages
   if [ -f "${HOME}/.Brewfile" ]; then
