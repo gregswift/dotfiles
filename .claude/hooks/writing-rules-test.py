@@ -7,6 +7,10 @@ stands in for the working tree, because several checks read the staged diff.
 
 Run: python3 ~/.claude/hooks/writing-rules-test.py
 """
+import ast
+import contextlib
+import importlib.util
+import io
 import json
 import os
 import shlex
@@ -152,6 +156,93 @@ def test_heredocs():
     code, err = run("git commit -F- <<'EOF'\nfeat: add gate\n\nThe gate was "
                     "silent, so a bad branch reached CI.\nEOF")
     check("heredoc commit passes", code == PASS, err)
+
+
+def load_hook():
+    """The hook as a module. Its file name holds a hyphen, so import cannot name it."""
+    spec = importlib.util.spec_from_file_location("writing_rules", HOOK)
+    hook = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(hook)
+    return hook
+
+
+def emitted_rules(hook):
+    """Rule IDs the check_ functions can return, read from the hook's source.
+
+    A finding is a (rule, message) tuple. The ID is the string that opens a
+    tuple, or either branch of a conditional that picks one."""
+    with open(HOOK, encoding="utf-8") as handle:
+        tree = ast.parse(handle.read())
+    found = set(hook.LENGTH_RULE.values())
+    for function in ast.walk(tree):
+        if not (isinstance(function, ast.FunctionDef)
+                and function.name.startswith("check_")):
+            continue
+        for node in ast.walk(function):
+            if isinstance(node, ast.Tuple) and node.elts:
+                picks = [node.elts[0]]
+            elif isinstance(node, ast.IfExp):
+                picks = [node.body, node.orelse]
+            else:
+                continue
+            found.update(p.value for p in picks
+                         if isinstance(p, ast.Constant) and isinstance(p.value, str))
+    return found
+
+
+def test_known_rules():
+    """An ID missing from KNOWN_RULES cannot be skipped by the override file."""
+    hook = load_hook()
+    found = emitted_rules(hook)
+    check("every emitted rule is in KNOWN_RULES", found <= hook.KNOWN_RULES,
+          "missing: %s" % ", ".join(sorted(found - hook.KNOWN_RULES)))
+    check("KNOWN_RULES holds no stale rule", hook.KNOWN_RULES <= found,
+          "stale: %s" % ", ".join(sorted(hook.KNOWN_RULES - found)))
+
+
+def run_with_override(content, command):
+    """(exit code, stderr, override file still exists) for one hook invocation.
+
+    Runs in process with the override path redirected, because the real path is
+    Greg's to write and a test must never create it."""
+    hook = load_hook()
+    scratch = tempfile.mkdtemp(prefix="writing-rules-override-")
+    hook.OVERRIDE_FILE = os.path.join(scratch, "override")
+    hook.LOG_FILE = os.path.join(scratch, "log")
+    with open(hook.OVERRIDE_FILE, "wb") as handle:
+        handle.write(content)
+
+    stdin, err = sys.stdin, io.StringIO()
+    sys.stdin = io.StringIO(json.dumps({"tool_input": {"command": command}, "cwd": REPO}))
+    try:
+        with contextlib.redirect_stderr(err):
+            code = hook.main()
+    finally:
+        sys.stdin = stdin
+    return code, err.getvalue().strip(), os.path.exists(hook.OVERRIDE_FILE)
+
+
+def test_override():
+    dash = "feat: x\n\nA real — dash.\n"
+
+    code, err, exists = run_with_override(b"# one use\nem-dash\n", commit(dash))
+    check("override skips the listed rule", code == PASS and "Skipped" in err, err)
+    check("passing command deletes the override", not exists, err)
+
+    code, err, exists = run_with_override(b"em-dash\n", commit(dash + "y" * 120 + "\n"))
+    check("blocked command keeps the override",
+          code == BLOCK and exists and "em-dash" not in err.split("Blocked:")[1], err)
+
+    code, err, exists = run_with_override(b"em_dash\n", commit(dash))
+    check("unknown name skips nothing", code == BLOCK and exists, err)
+    check("unknown name is reported", "Not a rule ID" in err and "em_dash" in err, err)
+
+    code, err, exists = run_with_override(b"em-dash\n", commit("feat: x\n\nA plain body.\n"))
+    check("unmatched override is deleted on a pass",
+          code == PASS and not exists and "not broken" in err, err)
+
+    code, err, exists = run_with_override(b"\xff\xfe\nem-dash\n", commit(dash))
+    check("non-UTF-8 override leaves the gate on", code == BLOCK, err)
 
 
 def test_ignored():

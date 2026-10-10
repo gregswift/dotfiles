@@ -11,8 +11,21 @@ must not stop work.
 WRITING_RULES_ALLOW is not honored. Setting it blocks the command and is
 recorded, because an agent can set an environment variable and a gate that any
 caller can switch off is not a gate. A skip is taken from
-~/.claude/hooks/writing-rules.override, which Greg writes by hand and which is
-consumed on first use.
+~/.claude/hooks/writing-rules.override, which Greg writes by hand.
+
+The override file:
+- Holds one rule ID from KNOWN_RULES per line. Blank lines and lines that open
+  with # are ignored.
+- Skips each listed rule, blocking or warning, on a checked command.
+- Is deleted by the first checked command that passes. A blocked command keeps
+  it, so the retry still has the skip.
+- Is not read by a command with no body to check, or by one whose message file
+  is unreadable.
+- Is shared by every session, so a command from another session can delete it.
+- Counts as absent when it is not UTF-8.
+
+A name outside KNOWN_RULES skips nothing. It is reported on stderr and in the
+log. Each read of the file prints what it skipped and whether it was deleted.
 """
 import json
 import os
@@ -41,7 +54,22 @@ WARN_ONLY = frozenset({
     "sentence-long",
 })
 
-RULES = """Writing rules (~/.claude/CLAUDE.md):
+# The override file can skip only an ID listed here, and reports any other name
+# as unknown. unreadable-message is absent on purpose: that text was never
+# checked, so there is no finding to skip.
+KNOWN_RULES = WARN_ONLY | frozenset({
+    "em-dash",
+    "sentence-length",
+    "banned-phrase",
+    "wrapping",
+    "body-line-length",
+    "tier-duplication",
+    "pr-body-length",
+    "issue-body-length",
+    "comment-body-length",
+})
+
+RULES ="""Writing rules (~/.claude/CLAUDE.md):
 - One idea per sentence, 20 words or fewer.
 - No em dashes. Use a comma, a colon, or a second sentence.
 - Wrap commit bodies at 100 characters (commitlint body-max-line-length).
@@ -710,22 +738,44 @@ def collect(kind, body, text, cwd, program="git"):
     return findings
 
 
-def take_override():
-    """Read the hand-written skip list and delete it, so one file is one use."""
+def read_override():
+    """Names in the hand-written skip file, or None when no file can be read."""
     try:
         with open(OVERRIDE_FILE, encoding="utf-8") as handle:
-            rules = {line.strip() for line in handle
-                     if line.strip() and not line.startswith("#")}
-    except OSError:
-        return set()
+            return {line.strip() for line in handle
+                    if line.strip() and not line.strip().startswith("#")}
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def drop_override():
     try:
         os.remove(OVERRIDE_FILE)
     except OSError:
         pass
-    return rules
 
 
-def record(kind, cwd, findings, bypassed, attempted=()):
+def override_notice(allowed, unknown, bypassed, state):
+    """Say what the override file did, so a skip is never silent."""
+    lines = ["Override file %s was read." % OVERRIDE_FILE]
+    if bypassed:
+        lines.append("  - Skipped on this command: %s." % ", ".join(sorted(bypassed)))
+    idle = allowed - bypassed
+    if idle:
+        lines.append("  - Listed, but not broken by this text: %s."
+                     % ", ".join(sorted(idle)))
+    if unknown:
+        lines.append("  - Not a rule ID, so nothing was skipped: %s."
+                     % ", ".join(sorted(unknown)))
+        lines.append("  - Valid rule IDs: %s." % ", ".join(sorted(KNOWN_RULES)))
+    if state == "consumed":
+        lines.append("  - The file is now deleted. One file covers one command that passes.")
+    else:
+        lines.append("  - The file was kept, because this command is blocked.")
+    return "\n".join(lines) + "\n\n"
+
+
+def record(kind, cwd, findings, bypassed, attempted=(), unknown=(), override=None):
     """Append one line per invocation. A silent log is worth more than a warning
     nobody rereads, and a bypass has to leave a trace to be reviewable."""
     import datetime
@@ -738,6 +788,8 @@ def record(kind, cwd, findings, bypassed, attempted=()):
         "warned": sorted({r for r, _ in findings if r in WARN_ONLY}),
         "bypassed": sorted(bypassed),
         "attempted": sorted(attempted),
+        "override": override,
+        "override_unknown": sorted(unknown),
     }
     try:
         with open(LOG_FILE, "a", encoding="utf-8") as handle:
@@ -767,10 +819,23 @@ def main():
         return 0
 
     attempted = {r.strip() for r in os.environ.get("WRITING_RULES_ALLOW", "").split(",") if r.strip()}
-    allowed = take_override()
+    override = read_override()
+    listed = override or set()
+    allowed = listed & KNOWN_RULES
+    unknown = listed - KNOWN_RULES
     all_findings = collect(kind, body, text, cwd, program)
     findings = [f for f in all_findings if f[0] not in allowed]
-    record(kind, cwd, all_findings, {r for r, _ in all_findings if r in allowed}, attempted)
+    bypassed = {r for r, _ in all_findings if r in allowed}
+    blocking = [f for f in findings if f[0] not in WARN_ONLY]
+    warnings = [f for f in findings if f[0] in WARN_ONLY]
+
+    state = None
+    if override is not None:
+        state = "kept" if attempted or blocking else "consumed"
+        if state == "consumed":
+            drop_override()
+        sys.stderr.write(override_notice(allowed, unknown, bypassed, state))
+    record(kind, cwd, all_findings, bypassed, attempted, unknown, state)
 
     if attempted:
         sys.stderr.write(
@@ -780,9 +845,6 @@ def main():
             "say why the text could not satisfy it. Do not retry the command, with or "
             "without the variable.\n" % (",".join(sorted(attempted)), LOG_FILE))
         return 2
-
-    blocking = [f for f in findings if f[0] not in WARN_ONLY]
-    warnings = [f for f in findings if f[0] in WARN_ONLY]
 
     label = LABELS[kind]
     if warnings:

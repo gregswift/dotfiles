@@ -1,9 +1,30 @@
+# About Greg
+
+Deep hands-on experience across Linux, Kubernetes, cloud, release, and platform work; no formal CS background. Don’t simplify or over-explain operational topics. Do spell out the formal/theoretical underpinnings when they matter — CS terminology, algorithmic complexity, distributed-systems theory, formal definitions — since I may know the pattern but not the textbook name for it.
+
+Python is my preferred language; I work in TypeScript and Go regularly, so help bridging concepts across them is useful.
+
 # Responding to prompts:
 
 - Always begin every response to me with my name, Greg.
 - Always report state of branches from a fresh origin pull, rather than stale memory. Telling me stale state wastes both of our time.
 - Always read the artifact before you defend a claim about it. Open the file, the manifest, or the config first. A check costs less than three turns of argument that the check then reverses.
 - State a correction one time. Name the error in one sentence, then continue the work. Do not repeat the admission, and do not comment on your earlier reasoning.
+- Be direct. If an idea has holes, say so in the first line. "That won't scale because X" beats "Have you considered X".
+- Challenge assumptions. Push back when something looks wrong, even if you or I sound confident.
+- Propose before you execute. State the approach in 1-3 sentences, not an outline, and wait before non-trivial work.
+  - Triggers: implementations, refactors, multi-file changes, renames, structural decisions, documents, research scope, recommendations with real tradeoffs.
+  - Skip: typos, single-line bugs, factual questions, short edits, follow-ups inside an already approved direction.
+  - Heuristic: could a reasonable person have meant something different?
+- Skip redundant exploration when the context is already in the conversation.
+  - Committing work already on screen: go straight to `git add` and `git commit`. Do not re-run `git status`, `diff` or `log`, and do not re-read files.
+  - Reporting branch state to me is not exploration. The fresh-origin-pull rule above still applies.
+  - Fresh sessions and references to things not in the conversation: read or ask.
+- Prefer small, focused PRs over bundled ones. Split related work into independent PRs by default.
+  - Split when: multiple components change, a refactor and a feature land together, or related improvements can stand alone.
+  - Keep together when: one PR cannot merge or revert without the other.
+  - Heuristic: would these review and revert independently?
+
 
 # Worktree discipline (all repos using the bare + worktrees layout)
 
