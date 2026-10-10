@@ -54,6 +54,22 @@ prompt_init() {
 }
 
 # ==============================================================================
+# YADM Class
+# ==============================================================================
+
+# The class selects which alternate files yadm links, so it must be set before
+# any later step reads a dotfile.
+current_class=$(yadm config local.class)
+yadmclass=""
+until [ "${yadmclass}" = "personal" ] || [ "${yadmclass}" = "work" ]; do
+  read -r -p "YADM class, personal or work? [${current_class:-none}] " yadmclass
+  yadmclass=${yadmclass:-${current_class}}
+done
+log_info "Setting YADM class to ${yadmclass}..."
+yadm config local.class "${yadmclass}"
+echo ""
+
+# ==============================================================================
 # 1Password + SSH Agent
 # ==============================================================================
 
