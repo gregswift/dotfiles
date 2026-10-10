@@ -314,7 +314,7 @@ fi
 # login exists. Podman then fails every run with an empty-JSON error.
 prompt_init "ghcr.io login" \
   "log podman in to the GitHub Container Registry with your gh token" \
-  'gh auth refresh -s read:packages \
+  'gh auth refresh --scopes packages,project \
    && gh auth token | podman login ghcr.io -u "${USER}" --password-stdin' \
   "podman login --get-login ghcr.io"
 
