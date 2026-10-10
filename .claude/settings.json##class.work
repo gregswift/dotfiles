@@ -1,0 +1,213 @@
+{
+  "env": {
+    "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
+    "OTEL_METRICS_EXPORTER": "otlp",
+    "OTEL_LOGS_EXPORTER": "otlp",
+    "OTEL_EXPORTER_OTLP_PROTOCOL": "grpc",
+    "OTEL_EXPORTER_OTLP_ENDPOINT": "http://localhost:4317",
+    "OTEL_METRIC_EXPORT_INTERVAL": "10000",
+    "OTEL_LOGS_EXPORT_INTERVAL": "5000",
+    "OTEL_LOG_TOOL_DETAILS": "1"
+  },
+  "attribution": {
+    "commit": "",
+    "pr": "",
+    "sessionUrl": false
+  },
+  "permissions": {
+    "deny": [
+      "Bash(pulumi up:*)",
+      "Bash(pulumi destroy:*)",
+      "Bash(pulumi refresh:*)",
+      "Bash(pulumi import:*)",
+      "Bash(pulumi state:*)",
+      "Bash(git add -A:*)",
+      "Bash(git add -a:*)",
+      "Bash(git add --all:*)",
+      "Bash(gh api *DELETE*)",
+      "Bash(flux reconcile:*)",
+      "Bash(flux suspend:*)",
+      "Bash(flux resume:*)"
+    ],
+    "ask": [
+      "Bash(kubectl:*)",
+      "Bash(az:*)",
+      "Bash(aws:*)",
+      "Bash(gcloud:*)",
+      "Bash(grpcurl:*)",
+      "Bash(pulumi stack:*)",
+      "Bash(gh api *-X*)",
+      "Bash(gh api *--method*)",
+      "Bash(gh api * -f *)",
+      "Bash(gh api * -F *)",
+      "Bash(gh api *--field*)",
+      "Bash(gh api *--raw-field*)",
+      "Bash(gh api *--input*)",
+      "Bash(gh issue comment:*)",
+      "Bash(gh pr comment:*)",
+      "Bash(gh pr review:*)",
+      "Bash(gh run rerun:*)",
+      "Bash(gh workflow run:*)"
+    ],
+    "blockReadsOutsideWorkingDirectories": true
+  },
+  "model": "opus",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/writing-rules.py"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/writing-rules-report.py"
+          }
+        ]
+      }
+    ]
+  },
+  "worktree": {
+    "baseRef": "fresh"
+  },
+  "workflowKeywordTriggerEnabled": false,
+  "statusLine": {
+    "type": "command",
+    "command": "COLUMNS=$((${COLUMNS:-120}-16)) oh-my-posh claude --config ~/.claude-prompt.json",
+    "padding": 0
+  },
+  "enabledPlugins": {
+    "gitops-skills@fluxcd": true,
+    "notion@claude-plugins-official": true,
+    "pulumi-migration@pulumi-agent-skills": true,
+    "pulumi@pulumi-agent-skills": true,
+    "i-have-adhd@i-have-adhd": true,
+    "andrej-karpathy-skills@karpathy-skills": true,
+    "mattpocock-skills@claude-plugins-official": true,
+    "signoz@signoz-skills": true,
+    "incident-io@incident-io-skills": true
+  },
+  "extraKnownMarketplaces": {
+    "fluxcd": {
+      "source": {
+        "source": "github",
+        "repo": "fluxcd/agent-skills"
+      }
+    },
+    "xatastor-skills": {
+      "source": {
+        "source": "github",
+        "repo": "xataio/xatastor-skills"
+      }
+    },
+    "pulumi-agent-skills": {
+      "source": {
+        "source": "github",
+        "repo": "pulumi/agent-skills"
+      }
+    },
+    "i-have-adhd": {
+      "source": {
+        "source": "github",
+        "repo": "ayghri/i-have-adhd"
+      }
+    },
+    "karpathy-skills": {
+      "source": {
+        "source": "github",
+        "repo": "forrestchang/andrej-karpathy-skills"
+      }
+    },
+    "signoz-skills": {
+      "source": {
+        "source": "github",
+        "repo": "SigNoz/agent-skills"
+      }
+    },
+    "incident-io-skills": {
+      "source": {
+        "source": "github",
+        "repo": "incident-io/skills"
+      }
+    }
+  },
+  "outputStyle": "Concise STE",
+  "sandbox": {
+    "enabled": true,
+    "autoAllowBashIfSandboxed": true,
+    "network": {
+      "allowedDomains": [
+        "docs.incident.io",
+        "*.github.com",
+        "github.com",
+        "*.golang.org",
+        "*.pulumi.com",
+        "pulumi.com",
+        "registry.npmjs.org",
+        "signoz.io",
+        "xata.io"
+      ],
+      "allowUnixSockets": [
+        "/Users/gregswift/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"
+      ]
+    },
+    "filesystem": {
+      "allowWrite": [
+        "/tmp/.pulumi",
+        "/var/folders"
+      ],
+      "allowRead": [
+        "~/.ssh/known_hosts",
+        "~/.local/bin",
+        "~/.config/gh"
+      ]
+    },
+    "excludedCommands": [
+      "gh pr *",
+      "gh issue *",
+      "gh run *",
+      "gh repo *",
+      "gh search *",
+      "gh auth status",
+      "git -C * commit*",
+      "git -C * fetch*",
+      "git -C * ls-remote*",
+      "git -C * new-worktree*",
+      "git -C * pull*",
+      "git -C * push*",
+      "git -C * refresh*",
+      "git -C * search*",
+      "git commit *",
+      "git fetch *",
+      "git ls-remote *",
+      "git new-worktree *",
+      "git pull *",
+      "git push *",
+      "git refresh *",
+      "git search *",
+      "podman *",
+      "make *"
+    ]
+  },
+  "feedbackDrafts": "off",
+  "effortLevel": "high",
+  "pluginConfigs": {
+    "signoz@signoz-skills": {
+      "options": {
+        "SIGNOZ_MCP_URL": "https://mcp.eu.signoz.cloud/mcp"
+      }
+    }
+  },
+  "tui": "fullscreen",
+  "editorMode": "normal",
+  "remoteControlAtStartup": true,
+  "agentPushNotifEnabled": true
+}

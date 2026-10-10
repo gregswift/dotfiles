@@ -8,7 +8,9 @@
 # Worktree discipline (all repos using the bare + worktrees layout)
 
 - Every branch gets a persistent worktree, created with `git new-worktree <branch>` (the repo's sibling-worktree layout). User's shell uses the `gwt` function for the same job; agents use `git new-worktree`. Never `checkout -b` inside an existing worktree, and never build branches in throwaway `git worktree add` dirs that get deleted after pushing.
-- After creating a worktree, do not `cd` into it inside commands. Tell Greg to run `/cd <worktree path>` so the session's working directory moves there, then continue with plain paths.
+- To work in a worktree, move the session there with `cd <worktree path>` as the whole Bash command, nothing else on the line. Then run plain commands with relative paths. The `cd` only holds when the directory is one of the session's working directories, so ask Greg for `/add-dir <worktree path>` in the same message as `git new-worktree`, before the `cd`.
+- Never chain `cd` with `&&` or `;`, and never use `git -C`. Both shapes run the command inside the sandbox, where git over SSH and `gh` fail on macOS.
+- Run `git fetch`, `git push`, `gh` and `make` as the whole command line: no pipe, no `&&`, no `VAR=…;` prefix. Only a line made entirely of excluded commands runs outside the sandbox.
 - This applies to subagents too: when delegating implementation that creates or rewrites branches, instruct the agent to create/use the persistent per-branch worktrees, not temp ones. A branch that exists only as a local ref (no worktree) is invisible to `git refresh --stack`/`--all` and will be stranded by the next refresh.
 - After any out-of-band force-push to a branch (e.g. by an agent in another session), reset the branch's worktree to origin before running `git refresh` there, so a stale local can't be replayed over origin's newer content.
 - For stacked branches, prefer `git refresh --stack` for main-catchup; verify with `-n` first, and always build/test at the affected stack points before pushing rebases.
