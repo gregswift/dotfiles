@@ -4,7 +4,7 @@
 # Making soem variables easier to update
 # ==============================================================================
 
-PINNED_CASKS="1password firefox google-chrome logi-options+ notion notion-calendar slack tailscale zoom"
+PINNED_CASKS="1password claude firefox google-chrome logi-options+ notion notion-calendar slack tailscale zoom"
 TRUSTED_TAPS="common-fate/granted domt4/autoupdate fluxcd/tap gregswift/tap hashicorp/tap jandedobbeleer/oh-my-posh pulumi/tap"
 
 # ==============================================================================

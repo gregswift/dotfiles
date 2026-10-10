@@ -54,6 +54,7 @@ brew "tree"
 brew "yq"
 
 cask "1password-cli"
+cask "claude"
 cask "firefox"
 cask "ghostty"
 cask "gcloud-cli"
