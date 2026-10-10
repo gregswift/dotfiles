@@ -310,6 +310,14 @@ if [ "${system_type}" = "Darwin" ]; then
   fi
 fi
 
+# The pvaas Makefiles set REGISTRY_AUTH_FILE to /dev/null when no registry
+# login exists. Podman then fails every run with an empty-JSON error.
+prompt_init "ghcr.io login" \
+  "log podman in to the GitHub Container Registry with your gh token" \
+  'gh auth refresh -s read:packages \
+   && gh auth token | podman login ghcr.io -u "${USER}" --password-stdin' \
+  "podman login --get-login ghcr.io"
+
 # Adds the font for the current oh-my-posh prompt. A font name as an argument is
 # already non-interactive; the --headless flag that used to force that is gone.
 prompt_init "Meslo Nerd Font" \
