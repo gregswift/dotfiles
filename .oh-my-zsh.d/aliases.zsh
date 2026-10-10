@@ -33,7 +33,7 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
   alias docker="podman"
   alias nano="$(brew --prefix nano)/bin/nano"
   alias python='podman run --rm -it -w /data -v /Users/gregswift:/data:Z ghcr.io/astral-sh/uv:python3.14-alpine uv run python'
-
+  alias podman-restart='podman machine stop; podman machine start'
   # these are typically dayjob oriented
   alias actionlint="go run github.com/rhysd/actionlint/cmd/actionlint"
   alias cue="go run cuelang.org/go/cmd/cue"
