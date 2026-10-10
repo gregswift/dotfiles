@@ -86,7 +86,7 @@ Supporting rules:
 - Identify the styling pattern inherent to the file you are editing. If no style exists, default to the recommended styling of the language. Change should not look different than the rest of the file. Prompt if inconclusive.
 - Answer the question a conditional comment raises.
 - File headers say purpose, function headers give the contract.
-- Always state full phrasing on first use of an acronym in a file or commit.
+- Always state full phrasing on first use of an acronym in a file or commit. An industry-standard acronym used in its standard sense, such as CI or API, needs no expansion.
 - Re-run the tests on every commit in the diff before pushing, reading it as if someone else wrote it, with delete as the default verdict.
 
 ## Committing code

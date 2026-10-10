@@ -90,6 +90,7 @@
 {% else %}
   program = "/opt/1Password/op-ssh-sign"
 {% endif %}
+  allowedSignersFile = ~/.config/git/allowed_signers
 
 [help]
   autocorrect = prompt

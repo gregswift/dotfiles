@@ -1,5 +1,5 @@
 {
-  "env": { },
+  "env": {},
   "attribution": {
     "commit": "",
     "pr": "",
@@ -69,7 +69,8 @@
   "enabledPlugins": {
     "i-have-adhd@i-have-adhd": true,
     "andrej-karpathy-skills@karpathy-skills": true,
-    "mattpocock-skills@claude-plugins-official": true
+    "mattpocock-skills@claude-plugins-official": true,
+    "cc-plugin-you-should-know@builtin": true
   },
   "extraKnownMarketplaces": {
     "i-have-adhd": {
@@ -139,8 +140,7 @@
   },
   "feedbackDrafts": "off",
   "effortLevel": "high",
-  "pluginConfigs": {
-  },
+  "pluginConfigs": {},
   "tui": "fullscreen",
   "editorMode": "normal",
   "remoteControlAtStartup": true,
